@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        dark: { 50:'#f5f5f5', 100:'#e5e5e5', 200:'#a3a3a3', 300:'#737373', 400:'#525252', 500:'#404040', 600:'#262626', 700:'#1a1a1a', 800:'#141414', 900:'#0a0a0a' }
+      }
+    }
+  }
+}
+</script>
+<title>YT Player</title>
+</head>
+<body class="bg-dark-900 text-white min-h-screen pb-32 font-sans antialiased">
+
+<div class="max-w-lg mx-auto px-4 py-5">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 bg-green-500 rounded-xl flex items-center justify-center text-lg shadow-lg shadow-green-500/20">🎵</div>
+      <h1 class="text-xl font-bold tracking-tight"><span class="text-green-400">YT</span> Player</h1>
+    </div>
+    <button id="installBtn" class="hidden items-center gap-1.5 bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium px-3 py-1.5 rounded-full hover:bg-green-500/20 transition-all active:scale-95 whitespace-nowrap">
+      <span>📲</span> Install
+    </button>
+  </div>
+
+  <!-- Search -->
+  <div class="relative mb-5">
+    <span class="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none text-lg">🔍</span>
+    <input type="text" id="searchInput" placeholder="Cari lagu..."
+      class="w-full pl-12 pr-10 py-3.5 bg-dark-700 border border-dark-500 rounded-2xl text-white text-base outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-all placeholder:text-neutral-500"
+      autocomplete="off">
+    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-500 cursor-pointer hidden text-lg hover:text-white transition-colors" id="clearBtn">✕</span>
+  </div>
+
+  <!-- Error -->
+  <div class="bg-red-900/40 text-red-400 px-4 py-3 rounded-xl text-sm hidden mb-3 border border-red-800/50" id="errorMsg"></div>
+
+  <!-- Results -->
+  <div id="results" class="space-y-2"></div>
+</div>
+
+<!-- Now Playing Bar -->
+<div id="nowPlaying" class="fixed bottom-0 left-0 right-0 bg-dark-700/95 backdrop-blur-xl border-t border-dark-500 px-4 py-3 z-50 hidden shadow-2xl">
+  
+  <!-- Info -->
+  <div class="flex items-center gap-3 mb-2.5">
+    <img class="w-11 h-11 rounded-xl object-cover flex-shrink-0 shadow-lg" id="npThumb" src="" alt="">
+    <div class="flex-1 min-w-0">
+      <div class="text-sm font-semibold truncate" id="npTitle">-</div>
+      <div class="text-xs text-neutral-400 truncate" id="npChannel">-</div>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="mb-2.5">
+    <div class="w-full h-1.5 bg-dark-500 rounded-full cursor-pointer relative" id="progressBar">
+      <div class="h-full bg-green-500 rounded-full transition-all duration-300 ease-linear" id="progressFill" style="width:0%"></div>
+    </div>
+    <div class="flex justify-between text-[10px] text-neutral-500 mt-1">
+      <span id="currentTime">0:00</span>
+      <span id="totalTime">0:00</span>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-5">
+      <button class="text-white/80 hover:text-white transition-colors text-xl active:scale-90" id="prevBtn">⏮</button>
+      <button class="text-white w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-xl shadow-lg shadow-green-500/30 active:scale-90 transition-all hover:bg-green-400" id="playBtn">▶</button>
+      <button class="text-white/80 hover:text-white transition-colors text-xl active:scale-90" id="nextBtn">⏭</button>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-sm text-neutral-400">🔊</span>
+      <input type="range" id="volSlider" min="0" max="100" value="80"
+        class="w-20 h-1 accent-green-500 cursor-pointer appearance-none bg-dark-500 rounded-full
+          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-green-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md">
+    </div>
+  </div>
+</div>
+
+<audio id="audioPlayer" preload="auto"></audio>
+
+<script>
+const searchInput = document.getElementById('searchInput');
+const clearBtn = document.getElementById('clearBtn');
+const resultsEl = document.getElementById('results');
+const errorMsg = document.getElementById('errorMsg');
+const audio = document.getElementById('audioPlayer');
+const np = document.getElementById('nowPlaying');
+const npThumb = document.getElementById('npThumb');
+const npTitle = document.getElementById('npTitle');
+const npChannel = document.getElementById('npChannel');
+const playBtn = document.getElementById('playBtn');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const progressFill = document.getElementById('progressFill');
+const progressBar = document.getElementById('progressBar');
+const cTime = document.getElementById('currentTime');
+const tTime = document.getElementById('totalTime');
+const volSlider = document.getElementById('volSlider');
+
+let queue = [];
+let currentIndex = -1;
+let searchTimer = null;
+
+// ─── Search ──────────────────────────────────────────────────────
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  clearBtn.style.display = q.length ? 'block' : 'none';
+  if (q.length < 2) {
+    resultsEl.innerHTML = emptyState('🎵', 'Cari lagu favorit Anda');
+    return;
+  }
+  searchTimer = setTimeout(() => doSearch(q), 300);
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { clearTimeout(searchTimer); doSearch(searchInput.value.trim()); }
+});
+
+clearBtn.addEventListener('click', () => {
+  searchInput.value = ''; clearBtn.style.display = 'none';
+  resultsEl.innerHTML = emptyState('🎵', 'Cari lagu favorit Anda');
+  searchInput.focus();
+});
+
+async function doSearch(q) {
+  if (q.length < 2) return;
+  resultsEl.innerHTML = spinner();
+  hideError();
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error(res.statusText);
+    const items = await res.json();
+    if (!items.length) { resultsEl.innerHTML = emptyState('😕', 'Tidak ditemukan'); return; }
+    queue = items;
+    renderResults(items);
+  } catch (e) { showError('Gagal mencari: ' + e.message); resultsEl.innerHTML = ''; }
+}
+
+function renderResults(items) {
+  resultsEl.innerHTML = items.map((item, idx) => {
+    const dur = fmtDur(item.duration);
+    const active = idx === currentIndex;
+    return `
+      <div class="flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-150
+        ${active ? 'bg-green-500/10 border border-green-500/30 shadow-md shadow-green-500/5' : 'bg-dark-600/60 hover:bg-dark-600 border border-transparent'}"
+        data-index="${idx}">
+        <img class="w-14 h-14 rounded-xl object-cover flex-shrink-0 bg-dark-500 shadow-md" src="${item.thumbnail}" alt="" loading="lazy"
+          onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2256%22><rect fill=%22%23333%22 width=%2256%22 height=%2256%22/></svg>'">
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium leading-tight line-clamp-2">${escHtml(item.title)}</div>
+          <div class="text-xs text-neutral-400 mt-1">${escHtml(item.channel)} · ${dur}</div>
+        </div>
+        <div class="w-9 h-9 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center flex-shrink-0 text-sm ${active ? 'bg-green-500 text-white' : ''}">${active ? '⏸' : '▶'}</div>
+      </div>
+    `;
+  }).join('');
+
+  resultsEl.querySelectorAll('[data-index]').forEach(el => {
+    el.addEventListener('click', () => playIndex(parseInt(el.dataset.index)));
+  });
+}
+
+// ─── Playback ────────────────────────────────────────────────────
+async function playIndex(idx) {
+  if (idx < 0 || idx >= queue.length) return;
+  currentIndex = idx;
+  const item = queue[idx];
+  resultsEl.innerHTML = resultsEl.innerHTML; // re-render
+  renderResults(queue);
+  np.style.display = 'block';
+  npThumb.src = item.thumbnail;
+  npTitle.textContent = item.title;
+  npChannel.textContent = item.channel;
+  audio.src = `/api/stream/${item.id}`;
+  audio.load();
+  audio.play().catch(e => showError('Gagal play: ' + e.message));
+  playBtn.innerHTML = '⏸';
+}
+
+playBtn.addEventListener('click', () => {
+  if (audio.paused) { audio.play().catch(()=>{}); playBtn.innerHTML = '⏸'; }
+  else { audio.pause(); playBtn.innerHTML = '▶'; }
+});
+
+prevBtn.addEventListener('click', () => {
+  if (audio.currentTime > 3) audio.currentTime = 0;
+  else if (currentIndex > 0) playIndex(currentIndex - 1);
+});
+
+nextBtn.addEventListener('click', () => {
+  if (currentIndex < queue.length - 1) playIndex(currentIndex + 1);
+});
+
+audio.addEventListener('ended', () => {
+  if (currentIndex < queue.length - 1) playIndex(currentIndex + 1);
+  else { playBtn.innerHTML = '▶'; progressFill.style.width = '0%'; }
+});
+
+audio.addEventListener('timeupdate', () => {
+  if (audio.duration) {
+    progressFill.style.width = ((audio.currentTime / audio.duration) * 100) + '%';
+    cTime.textContent = fmtTime(audio.currentTime);
+  }
+});
+
+audio.addEventListener('loadedmetadata', () => { tTime.textContent = fmtTime(audio.duration); });
+audio.addEventListener('error', () => { showError('Gagal memuat audio'); playBtn.innerHTML = '▶'; });
+
+progressBar.addEventListener('click', (e) => {
+  if (!audio.duration) return;
+  audio.currentTime = ((e.clientX - progressBar.getBoundingClientRect().left) / progressBar.offsetWidth) * audio.duration;
+});
+
+volSlider.addEventListener('input', () => { audio.volume = volSlider.value / 100; });
+audio.volume = 0.8;
+
+// ─── Helpers ─────────────────────────────────────────────────────
+function fmtDur(s) { if (!s||isNaN(s)) return '?'; const m=Math.floor(s/60), sc=Math.floor(s%60); return m+':'+String(sc).padStart(2,'0'); }
+function fmtTime(s) { if (!s||isNaN(s)) return '0:00'; const m=Math.floor(s/60), sc=Math.floor(s%60); return m+':'+String(sc).padStart(2,'0'); }
+function escHtml(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+function showError(m) { errorMsg.textContent=m; errorMsg.classList.add('!block'); }
+function hideError() { errorMsg.classList.remove('!block'); }
+function emptyState(icon, msg) { return `<div class="text-center text-neutral-500 py-16"><div class="text-5xl mb-3">${icon}</div><p class="text-sm">${msg}</p></div>`; }
+function spinner() { return `<div class="text-center text-neutral-500 py-16"><div class="text-4xl mb-2 animate-pulse">🔍</div><p class="text-sm">Mencari...</p></div>`; }
+
+// ─── PWA Install ─────────────────────────────────────────────────
+const installBtn = document.getElementById('installBtn');
+let deferredPrompt = null;
+
+// Android Chrome: tangkap beforeinstallprompt
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.classList.remove('hidden');
+  installBtn.classList.add('flex');
+});
+
+installBtn.addEventListener('click', async () => {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const result = await deferredPrompt.userChoice;
+    if (result.outcome === 'accepted') {
+      installBtn.classList.add('hidden');
+      installBtn.classList.remove('flex');
+    }
+    deferredPrompt = null;
+  }
+});
+
+// Cek udah terinstall atau belum
+window.addEventListener('appinstalled', () => {
+  installBtn.classList.add('hidden');
+  installBtn.classList.remove('flex');
+});
+
+// iOS Safari: deteksi & kasih tahu cara install manual
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+if (isIOS && !isStandalone) {
+  installBtn.classList.remove('hidden');
+  installBtn.classList.add('flex');
+  installBtn.onclick = () => {
+    showError('📲 Tap tombol Share (📤) → "Add to Home Screen"');
+  };
+}
+
+// Service Worker
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+</script>
+</body>
+</html>

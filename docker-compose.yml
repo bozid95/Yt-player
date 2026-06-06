@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yt-player:latest
+    container_name: yt-player
+    restart: unless-stopped
+    environment:
+      - YOUTUBE_COOKIES
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
