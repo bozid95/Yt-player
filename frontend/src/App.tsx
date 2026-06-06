@@ -489,18 +489,11 @@ export default function App() {
         {showPlayer && current && (
           <div className="flex flex-col min-h-[calc(100vh-3rem)] bg-background text-foreground">
 
-            {/* Top bar: back | title | menu */}
-            <div className="flex items-center justify-between px-2 py-2">
+            {/* Top bar: back aja */}
+            <div className="flex items-center px-2 py-2">
               <button onClick={() => setShowPlayer(false)}
-                className="flex items-center justify-center w-10 h-10 text-muted-foreground hover:text-foreground active:scale-90 transition-all rounded-full hover:bg-accent">
+                className="flex items-center justify-center w-10 h-10 text-muted-foreground hover:text-foreground active:scale-90 transition-all rounded-full hover:bg-accent -ml-2">
                 <ChevronDown className="w-6 h-6" />
-              </button>
-              <div className="text-center flex-1 mx-2">
-                <p className="text-xs font-medium truncate text-foreground">{current.title}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{current.channel}</p>
-              </div>
-              <button className="flex items-center justify-center w-10 h-10 text-muted-foreground hover:text-foreground active:scale-90 transition-all rounded-full hover:bg-accent">
-                <span className="text-lg font-bold leading-none">···</span>
               </button>
             </div>
 
