@@ -46,6 +46,8 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('all')
   const [shuffle, setShuffle] = useState(false)
+  const [seeking, setSeeking] = useState(false)
+  const [seekTime, setSeekTime] = useState(0)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
@@ -140,13 +142,48 @@ export default function App() {
     if (currentIdxRef.current > 0) playTrack(currentIdxRef.current - 1)
   }, [playTrack])
 
-  const seek = useCallback((e: React.MouseEvent) => {
-    const audio = audioRef.current
-    if (!audio || !duration) return
+  const calcSeek = useCallback((clientX: number) => {
     const rect = progressRef.current?.getBoundingClientRect()
-    if (!rect) return
-    audio.currentTime = ((e.clientX - rect.left) / rect.width) * duration
+    if (!rect || !duration) return 0
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * duration
   }, [duration])
+
+  const startSeek = useCallback((clientX: number) => {
+    setSeeking(true)
+    setSeekTime(calcSeek(clientX))
+  }, [calcSeek])
+
+  const onSeekMove = useCallback((clientX: number) => {
+    if (!seeking) return
+    setSeekTime(calcSeek(clientX))
+  }, [seeking, calcSeek])
+
+  const endSeek = useCallback((clientX: number) => {
+    if (!seeking) return
+    const audio = audioRef.current
+    if (audio) audio.currentTime = calcSeek(clientX)
+    setSeeking(false)
+  }, [seeking, calcSeek])
+
+  // Drag via Mouse
+  useEffect(() => {
+    if (!seeking) return
+    const onMouse = (e: MouseEvent) => { e.preventDefault(); onSeekMove(e.clientX) }
+    const onUp = (e: MouseEvent) => endSeek(e.clientX)
+    document.addEventListener('mousemove', onMouse)
+    document.addEventListener('mouseup', onUp)
+    return () => { document.removeEventListener('mousemove', onMouse); document.removeEventListener('mouseup', onUp) }
+  }, [seeking, onSeekMove, endSeek])
+
+  // Drag via Touch
+  useEffect(() => {
+    if (!seeking) return
+    const onTouch = (e: TouchEvent) => { e.preventDefault(); onSeekMove(e.touches[0].clientX) }
+    const onEnd = (e: TouchEvent) => endSeek(e.changedTouches[0].clientX)
+    document.addEventListener('touchmove', onTouch, { passive: false })
+    document.addEventListener('touchend', onEnd)
+    return () => { document.removeEventListener('touchmove', onTouch); document.removeEventListener('touchend', onEnd) }
+  }, [seeking, onSeekMove, endSeek])
 
   // ─── Audio Events ─────────────────────────────────────────────────
   useEffect(() => {
@@ -477,15 +514,17 @@ export default function App() {
 
               {/* Progress */}
               <div className="w-full mb-2">
-                <div ref={progressRef} onClick={seek}
-                  className="w-full h-1 bg-muted-foreground/20 rounded-full cursor-pointer relative overflow-hidden group">
-                  <div className="h-full bg-primary rounded-full transition-[width] duration-300 ease-linear"
-                    style={{ width: `${progress}%` }} />
-                  <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ left: `calc(${progress}% - 6px)` }} />
+                <div ref={progressRef}
+                  onMouseDown={e => startSeek(e.clientX)}
+                  onTouchStart={e => startSeek(e.touches[0].clientX)}
+                  className="w-full h-1 bg-muted-foreground/20 rounded-full cursor-pointer relative overflow-hidden group active:h-2 transition-all active:shadow-md active:shadow-primary/20">
+                  <div className={`h-full bg-primary rounded-full ${!seeking ? 'transition-[width] duration-300 ease-linear' : ''}`}
+                    style={{ width: `${seeking ? (seekTime / duration) * 100 : progress}%` }} />
+                  <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-primary rounded-full shadow-md opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity"
+                    style={{ left: `calc(${seeking ? (seekTime / duration) * 100 : progress}% - 8px)`, top: '50%' }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground mt-1 px-0.5">
-                  <span>{fmt(currentTime)}</span>
+                  <span>{seeking ? fmt(seekTime) : fmt(currentTime)}</span>
                   <span>{fmt(duration)}</span>
                 </div>
               </div>
