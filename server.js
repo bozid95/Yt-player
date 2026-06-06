@@ -23,14 +23,15 @@ if (process.env.YOUTUBE_COOKIES) {
 
 app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 
-// Cek cookies di startup
+// Cek cookies di startup (async, biar gak ngeblock)
 if (fs.existsSync(COOKIE_PATH)) {
-  try {
-    execSync(`yt-dlp --cookies ${COOKIE_PATH} --skip-download --print id "https://music.youtube.com/watch?v=dQw4w9WgXcQ"`, { timeout: 10000 });
-    console.log('[OK] YouTube cookies valid');
-  } catch (e) {
-    console.warn('[WARN] Cookies mungkin expired:', e.message);
-  }
+  const { exec } = require('child_process');
+  exec(`yt-dlp --cookies ${COOKIE_PATH} --skip-download --print id "https://music.youtube.com/watch?v=dQw4w9WgXcQ" 2>/dev/null`,
+    (err) => {
+      if (err) console.warn('[WARN] Cookies mungkin expired');
+      else console.log('[OK] YouTube cookies valid');
+    }
+  );
 } else {
   console.warn('[WARN] Tidak ada cookies — streaming mungkin gagal');
 }
