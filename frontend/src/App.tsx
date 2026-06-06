@@ -323,77 +323,91 @@ export default function App() {
 
         {/* ── PLAYER VIEW (FULL SCREEN) ──────────────────────────────── */}
         {showPlayer && current && (
-          <div className="flex flex-col items-center min-h-[calc(100vh-4rem)] justify-between py-4">
+          <div className="flex flex-col min-h-[calc(100vh-4rem)] py-4">
 
             {/* Close / back to list */}
-            <div className="w-full flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2">
               <button onClick={() => setShowPlayer(false)}
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 <ChevronDown className="w-5 h-5" /> Daftar
               </button>
-              <button onClick={() => setRepeatMode(r => r === 'none' ? 'all' : r === 'all' ? 'one' : 'none')}
-                className={cn("flex items-center gap-1 text-xs transition-all",
-                  repeatMode !== 'none' ? "text-primary" : "text-muted-foreground")}>
-                {repeatMode === 'one' ? <Repeat1 className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
-                <span>{repeatMode === 'one' ? '1x' : repeatMode === 'all' ? 'All' : 'Off'}</span>
-              </button>
+              <span className="text-xs text-muted-foreground">{queue.length} lagu</span>
             </div>
 
-            {/* Album art */}
-            <div className="w-full max-w-sm aspect-square rounded-2xl overflow-hidden shadow-2xl ring-1 ring-border/30 mb-6">
-              <img src={current.thumbnail} alt=""
-                className="w-full h-full object-cover"
-                onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect fill="%23222" width="400" height="400"/><text x="200" y="220" text-anchor="middle" font-size="80" fill="%23666">🎵</text></svg>')} />
-            </div>
+            {/* ── Middle: Album + Info + Progress ────────────────── */}
+            <div className="flex-1 flex flex-col items-center justify-center px-4">
 
-            {/* Song info */}
-            <div className="w-full text-center mb-6">
-              <h2 className="text-xl font-bold leading-tight line-clamp-2">{current.title}</h2>
-              <p className="text-sm text-muted-foreground mt-1.5">{current.channel}</p>
-            </div>
-
-            {/* Progress */}
-            <div className="w-full mb-4">
-              <div ref={progressRef} onClick={seek}
-                className="w-full h-2 bg-muted rounded-full cursor-pointer relative overflow-hidden group">
-                <div className="h-full bg-primary rounded-full transition-[width] duration-300 ease-linear group-hover:brightness-110"
-                  style={{ width: `${progress}%` }} />
-                <div className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-primary rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ left: `calc(${progress}% - 7px)` }} />
+              {/* Album art */}
+              <div className="w-full max-w-sm aspect-square rounded-2xl overflow-hidden shadow-2xl ring-1 ring-border/30 mb-6">
+                <img src={current.thumbnail} alt=""
+                  className="w-full h-full object-cover"
+                  onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect fill="%23222" width="400" height="400"/><text x="200" y="220" text-anchor="middle" font-size="80" fill="%23666">🎵</text></svg>')} />
               </div>
-              <div className="flex justify-between text-xs text-muted-foreground mt-1.5 px-0.5">
-                <span>{fmt(currentTime)}</span>
-                <span>{fmt(duration)}</span>
+
+              {/* Song info */}
+              <div className="w-full text-center mb-6">
+                <h2 className="text-xl font-bold leading-tight line-clamp-2">{current.title}</h2>
+                <p className="text-sm text-muted-foreground mt-1.5">{current.channel}</p>
               </div>
+
+              {/* Progress */}
+              <div className="w-full mb-2">
+                <div ref={progressRef} onClick={seek}
+                  className="w-full h-2 bg-muted rounded-full cursor-pointer relative overflow-hidden group">
+                  <div className="h-full bg-primary rounded-full transition-[width] duration-300 ease-linear group-hover:brightness-110"
+                    style={{ width: `${progress}%` }} />
+                  <div className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-primary rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ left: `calc(${progress}% - 7px)` }} />
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground mt-1.5 px-0.5">
+                  <span>{fmt(currentTime)}</span>
+                  <span>{fmt(duration)}</span>
+                </div>
+              </div>
+
             </div>
 
-            {/* Main controls */}
-            <div className="w-full flex items-center justify-center gap-6 mb-6">
-              <button onClick={prevTrack}
-                className="text-muted-foreground hover:text-foreground transition-colors active:scale-90 p-2">
-                <SkipBack className="w-6 h-6" />
-              </button>
+            {/* ── Bottom: Volume + Controls (thumb zone) ─────────── */}
+            <div className="px-4 mt-auto">
 
-              <button onClick={togglePlay}
-                className="w-16 h-16 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl shadow-primary/40 active:scale-90 transition-all hover:bg-primary/90">
-                {playing ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-0.5" />}
-              </button>
-
-              <button onClick={nextTrack}
-                className="text-muted-foreground hover:text-foreground transition-colors active:scale-90 p-2">
-                <SkipForward className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Volume + queue */}
-            <div className="w-full flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-muted-foreground" />
+              {/* Volume */}
+              <div className="flex items-center gap-3 mb-5">
+                <Volume2 className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <input type="range" min="0" max="100" value={volume}
                   onChange={e => { const v = +e.target.value; setVolume(v); if (audioRef.current) audioRef.current.volume = v / 100 }}
-                  className="w-24 sm:w-32 h-1 accent-primary cursor-pointer" />
+                  className="flex-1 h-1.5 accent-primary cursor-pointer" />
               </div>
-              <span className="text-xs text-muted-foreground">{queue.length} lagu</span>
+
+              {/* Nav + Play + Repeat */}
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-5">
+                  <button onClick={prevTrack}
+                    className="text-muted-foreground hover:text-foreground transition-colors active:scale-90 p-2">
+                    <SkipBack className="w-6 h-6" />
+                  </button>
+
+                  <button onClick={togglePlay}
+                    className="w-14 h-14 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl shadow-primary/40 active:scale-90 transition-all hover:bg-primary/90">
+                    {playing ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
+                  </button>
+
+                  <button onClick={nextTrack}
+                    className="text-muted-foreground hover:text-foreground transition-colors active:scale-90 p-2">
+                    <SkipForward className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <button onClick={() => setRepeatMode(r => r === 'none' ? 'all' : r === 'all' ? 'one' : 'none')}
+                  className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all active:scale-90",
+                    repeatMode !== 'none'
+                      ? "bg-primary/15 text-primary border border-primary/30"
+                      : "text-muted-foreground hover:text-foreground border border-transparent")}>
+                  {repeatMode === 'one' ? <Repeat1 className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
+                  <span className="text-xs font-medium">
+                    {repeatMode === 'one' ? '1x' : repeatMode === 'all' ? 'All' : 'Off'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         )}
