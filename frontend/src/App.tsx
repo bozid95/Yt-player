@@ -70,7 +70,6 @@ export default function App() {
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const progressRef = useRef<HTMLDivElement>(null)
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const currentIdxRef = useRef(-1)
   const loadingRef = useRef(false)
 
@@ -218,6 +217,7 @@ export default function App() {
     if (q.length < 2) return
     setLoading(true)
     setError('')
+    setShowSuggestions(false)
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
       if (!res.ok) throw new Error(res.statusText)
@@ -231,11 +231,12 @@ export default function App() {
     }
   }, [])
 
-  useEffect(() => {
-    clearTimeout(searchTimer.current)
-    if (query.length < 2) { setTracks([]); return }
-    searchTimer.current = setTimeout(() => doSearch(query), 300)
-  }, [query, doSearch])
+  const handleSearch = useCallback((q: string) => {
+    setQuery(q)
+    doSearch(q)
+  }, [doSearch])
+
+  // Gak auto-search tiap ngetik — search cuma lewat suggestion tap / Enter
 
   // ─── Keyboard shortcuts ──────────────────────────────────────────
   useEffect(() => {
@@ -317,6 +318,7 @@ export default function App() {
               value={query}
               onChange={e => setQuery(e.target.value)}
               onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(query); } }}
               autoComplete="off"
               enterKeyHint="search"
               className="w-full h-12 pl-10 pr-4 rounded-xl border border-input bg-card text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring transition-all" />
@@ -325,7 +327,7 @@ export default function App() {
             {showSuggestions && suggestions.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
                 {suggestions.map((s, i) => (
-                  <button key={i} onMouseDown={e => { e.preventDefault(); setQuery(s); setShowSuggestions(false); }}
+                  <button key={i} onMouseDown={e => { e.preventDefault(); handleSearch(s); }}
                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-accent transition-colors">
                     <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                     <span className="truncate">{s}</span>
