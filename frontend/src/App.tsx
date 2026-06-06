@@ -59,7 +59,7 @@ export default function App() {
     setHistory(prev => {
       // Hapus duplikat, taruh paling depan
       const filtered = prev.filter(t => t.id !== track.id)
-      const next = [track, ...filtered].slice(0, 50) // max 50 item
+      const next = [track, ...filtered].slice(0, 10) // max 10 item
       try { localStorage.setItem('yt-history', JSON.stringify(next)) } catch {}
       return next
     })
