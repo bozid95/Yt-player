@@ -1,16 +1,30 @@
 const express = require('express');
-const { execSync, spawn } = require('child_process');
+const { exec, execSync, spawn } = require('child_process');
 const fs = require('fs');
 const https = require('https');
-const http = require('http');
 const path = require('path');
-const { URL } = require('url');
 
 const app = express();
 const PORT = 3000;
 const COOKIE_PATH = '/tmp/youtube-cookies.txt';
 
-// Decode cookies dari env var (base64)
+// ─── In-memory cache ──────────────────────────────────────────────
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 menit
+function cached(key, ttl = CACHE_TTL) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.time < ttl) return hit.data;
+  return null;
+}
+function setCache(key, data) {
+  cache.set(key, { data, time: Date.now() });
+  if (cache.size > 100) {
+    const oldest = [...cache.entries()].sort((a, b) => a[1].time - b[1].time)[0];
+    cache.delete(oldest[0]);
+  }
+}
+
+// ─── Cookies ──────────────────────────────────────────────────────
 if (process.env.YOUTUBE_COOKIES) {
   try {
     const content = Buffer.from(process.env.YOUTUBE_COOKIES, 'base64').toString('utf-8');
@@ -21,147 +35,110 @@ if (process.env.YOUTUBE_COOKIES) {
   }
 }
 
-app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
-
-// Cek cookies di startup (async, biar gak ngeblock)
+// Cek cookies di background
 if (fs.existsSync(COOKIE_PATH)) {
-  const { exec } = require('child_process');
-  exec(`yt-dlp --cookies ${COOKIE_PATH} --skip-download --print id "https://music.youtube.com/watch?v=dQw4w9WgXcQ" 2>/dev/null`,
-    (err) => {
-      if (err) console.warn('[WARN] Cookies mungkin expired');
-      else console.log('[OK] YouTube cookies valid');
-    }
+  exec(`yt-dlp --cookies '${COOKIE_PATH}' --skip-download --print id 'https://music.youtube.com/watch?v=dQw4w9WgXcQ' 2>/dev/null`,
+    (err) => { if (err) console.warn('[WARN] Cookies mungkin expired'); else console.log('[OK] YouTube cookies valid'); }
   );
 } else {
   console.warn('[WARN] Tidak ada cookies — streaming mungkin gagal');
+}
+
+// ─── Static files with cache ──────────────────────────────────────
+app.use(express.static(path.join(__dirname, 'frontend', 'dist'), {
+  maxAge: '1h',
+  etag: true,
+  immutable: true,
+}));
+
+// ─── Utility: parse yt-dlp JSON lines ────────────────────────────
+function parseYtLines(output) {
+  return output.toString().trim().split('\n').filter(Boolean).map(l => {
+    try { return JSON.parse(l); } catch { return null; }
+  }).filter(Boolean).map(item => ({
+    id: item.id,
+    title: item.title || 'Unknown',
+    duration: item.duration || 0,
+    thumbnail: `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
+    channel: item.channel || item.uploader || 'Unknown',
+  }));
 }
 
 // ─── Search suggestions ──────────────────────────────────────────
 app.get('/api/suggest', (req, res) => {
   const q = req.query.q;
   if (!q || q.length < 1) return res.json([]);
-  const sanitized = encodeURIComponent(q);
-  https.get(`https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${sanitized}`, (r) => {
+
+  const cacheKey = 'suggest:' + q;
+  const hit = cached(cacheKey, 60000); // cache 1 menit
+  if (hit) return res.json(hit);
+
+  https.get(`https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${encodeURIComponent(q)}`, (r) => {
     let data = '';
     r.on('data', c => data += c);
     r.on('end', () => {
       try {
         const parsed = JSON.parse(data);
-        res.json(parsed[1] || []);
+        const suggestions = parsed[1] || [];
+        setCache(cacheKey, suggestions);
+        res.json(suggestions);
       } catch { res.json([]); }
     });
   }).on('error', () => res.json([]));
 });
 
-// ─── Search YouTube ──────────────────────────────────────────────
+// ─── Search YouTube (cached 5 menit) ────────────────────────────
 app.get('/api/search', (req, res) => {
   const q = req.query.q;
   if (!q || q.length < 2) return res.json([]);
 
-  try {
-    const sanitized = q.replace(/[^a-zA-Z0-9\s\-_]/g, '');
-    const result = execSync(
-      `yt-dlp --cookies ${COOKIE_PATH} --flat-playlist --dump-json --no-warnings "ytsearch10:${sanitized}" 2>/dev/null`,
-      { timeout: 20000, maxBuffer: 1024 * 1024 }
-    );
-    const lines = result.toString().trim().split('\n').filter(Boolean);
-    const items = lines.map(l => {
-      try { return JSON.parse(l); } catch { return null; }
-    }).filter(Boolean);
+  const cacheKey = 'search:' + q.toLowerCase();
+  const hit = cached(cacheKey);
+  if (hit) return res.json(hit);
 
-    res.json(items.map(item => ({
-      id: item.id,
-      title: item.title || 'Unknown',
-      duration: item.duration || 0,
-      thumbnail: `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
-      url: `https://youtube.com/watch?v=${item.id}`,
-      channel: item.channel || item.uploader || 'Unknown',
-    })));
+  try {
+    const result = execSync(
+      `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings 'ytsearch10:${q.replace(/'/g, "'\\''")}' 2>/dev/null`,
+      { timeout: 15000, maxBuffer: 512 * 1024 }
+    );
+    const items = parseYtLines(result);
+    setCache(cacheKey, items);
+    res.json(items);
   } catch (e) {
     console.error('Search error:', e.message);
-    res.status(500).json({ error: 'Search failed: ' + e.message });
+    res.status(500).json({ error: 'Search gagal, coba lagi' });
   }
 });
 
-// ─── Get video info ──────────────────────────────────────────────
-app.get('/api/info/:id', (req, res) => {
-  const id = req.params.id;
-  if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
-
-  try {
-    const result = execSync(
-      `yt-dlp --cookies ${COOKIE_PATH} --dump-json --no-warnings "https://youtube.com/watch?v=${id}" 2>/dev/null`,
-      { timeout: 20000, maxBuffer: 1024 * 1024 }
-    );
-    const info = JSON.parse(result.toString());
-    res.json({
-      id: info.id,
-      title: info.title,
-      duration: info.duration,
-      thumbnail: `https://i.ytimg.com/vi/${info.id}/hqdefault.jpg`,
-      channel: info.channel || info.uploader,
-      formats: (info.formats || []).filter(f => f.acodec && f.acodec !== 'none').map(f => ({
-        id: f.format_id,
-        ext: f.ext,
-        abr: f.abr || 0,
-        filesize: f.filesize || 0,
-        url: f.url,
-      })),
-    });
-  } catch (e) {
-    res.status(500).json({ error: 'Info fetch failed: ' + e.message });
-  }
-});
-
-// ─── Related / Mix (autoplay recommendations) ────────────────────
+// ─── Related / Mix (cached 10 menit) ────────────────────────────
 app.get('/api/related/:id', (req, res) => {
   const id = req.params.id;
   if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
 
-  // Coba YouTube Music mix dulu, fallback ke YouTube regular mix
-  const mixUrl = `https://music.youtube.com/watch?v=${id}&list=RDAMVM${id}`;
-  try {
-    const result = execSync(
-      `yt-dlp --cookies ${COOKIE_PATH} --flat-playlist --dump-json --no-warnings "${mixUrl}" 2>/dev/null`,
-      { timeout: 15000, maxBuffer: 1024 * 1024 }
-    );
-    const lines = result.toString().trim().split('\n').filter(Boolean);
-    const items = lines.map(l => {
-      try { return JSON.parse(l); } catch { return null; }
-    }).filter(Boolean);
+  const cacheKey = 'related:' + id;
+  const hit = cached(cacheKey, 10 * 60 * 1000); // 10 menit
+  if (hit) return res.json(hit);
 
-    // Skip the first item (it's the same video), max 15 recommendations
-    const related = items.slice(1, 16).map(item => ({
-      id: item.id,
-      title: item.title || 'Unknown',
-      duration: item.duration || 0,
-      thumbnail: `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
-      channel: item.channel || item.uploader || 'Unknown',
-    }));
-    res.json(related);
-  } catch {
-    // Fallback: coba YouTube regular mix
+  const tryMix = (url) => {
     try {
-      const fallbackUrl = `https://www.youtube.com/watch?v=${id}&list=RD${id}`;
       const result = execSync(
-        `yt-dlp --cookies ${COOKIE_PATH} --flat-playlist --dump-json --no-warnings "${fallbackUrl}" 2>/dev/null`,
-        { timeout: 15000, maxBuffer: 1024 * 1024 }
+        `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings '${url}' 2>/dev/null`,
+        { timeout: 10000, maxBuffer: 512 * 1024 }
       );
-      const lines = result.toString().trim().split('\n').filter(Boolean);
-      const items = lines.map(l => {
-        try { return JSON.parse(l); } catch { return null; }
-      }).filter(Boolean);
-      const related = items.slice(1, 16).map(item => ({
-        id: item.id,
-        title: item.title || 'Unknown',
-        duration: item.duration || 0,
-        thumbnail: `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
-        channel: item.channel || item.uploader || 'Unknown',
-      }));
-      res.json(related);
-    } catch (e) {
-      res.json([]); // Gak ada rekomendasi
-    }
+      const items = parseYtLines(result).slice(1, 16);
+      setCache(cacheKey, items);
+      return res.json(items);
+    } catch { return null; }
+  };
+
+  // Coba YouTube Music mix dulu
+  const musicUrl = `https://music.youtube.com/watch?v=${id}&list=RDAMVM${id}`;
+  const result = tryMix(musicUrl);
+  if (result === null) {
+    // Fallback: YouTube regular mix
+    const fallbackUrl = `https://www.youtube.com/watch?v=${id}&list=RD${id}`;
+    const fallback = tryMix(fallbackUrl);
+    if (fallback === null) res.json([]);
   }
 });
 
@@ -171,88 +148,55 @@ app.get('/api/stream/:id', (req, res) => {
   if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
 
   const url = `https://youtube.com/watch?v=${id}`;
-
-  // Pipe yt-dlp output langsung ke response
-  // Format: 18 (360p mp4 with AAC audio) atau fallback
-  const yt = spawn('yt-dlp', [
-    '--cookies', COOKIE_PATH,
-    '--no-warnings',
-    '--js-runtimes', 'deno',
-    '--remote-components', 'ejs:github',
-    '-f', '18/bestaudio/best',
-    '-o', '-',
-    url,
-  ]);
-
   let headersSent = false;
-  let hasData = false;
 
-  yt.stdout.on('data', (chunk) => {
-    if (!headersSent) {
-      res.setHeader('Content-Type', 'video/mp4');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      headersSent = true;
-      hasData = true;
-    }
-    res.write(chunk);
-  });
+  const cleanup = () => { if (!headersSent && !res.writableEnded) { try { res.end(); } catch {} } };
 
-  yt.stderr.on('data', (chunk) => {
-    const msg = chunk.toString();
-    if (msg.includes('ERROR')) {
-      console.error('[yt-dlp error]', msg);
-    }
-  });
+  const spawnStream = (format) => {
+    const yt = spawn('yt-dlp', [
+      '--cookies', COOKIE_PATH,
+      '--no-warnings',
+      '--js-runtimes', 'deno',
+      '--remote-components', 'ejs:github',
+      '-f', format,
+      '-o', '-',
+      url,
+    ]);
 
-  yt.on('close', (code) => {
-    if (!headersSent) {
-      // Gagal, coba tanpa format spesifik
-      const yt2 = spawn('yt-dlp', [
-        '--cookies', COOKIE_PATH,
-        '--no-warnings',
-        '--js-runtimes', 'deno',
-        '--remote-components', 'ejs:github',
-        '-f', 'best',
-        '-o', '-',
-        url,
-      ]);
+    yt.stdout.on('data', (chunk) => {
+      if (!headersSent) {
+        res.setHeader('Content-Type', format === '18/bestaudio/best' ? 'video/mp4' : 'audio/webm');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Accept-Ranges', 'none');
+        headersSent = true;
+      }
+      res.write(chunk);
+    });
 
-      yt2.stdout.on('data', (chunk) => {
-        if (!headersSent) {
-          res.setHeader('Content-Type', 'audio/webm');
-          res.setHeader('Cache-Control', 'public, max-age=3600');
-          headersSent = true;
-          hasData = true;
-        }
-        res.write(chunk);
-      });
+    yt.stderr.on('data', () => {}); // silent
 
-      yt2.on('close', (code2) => {
-        if (!headersSent) {
-          res.status(500).json({ error: 'Stream failed' });
+    yt.on('close', (code) => {
+      if (!headersSent) {
+        if (format === '18/bestaudio/best') {
+          spawnStream('best'); // fallback
         } else {
-          res.end();
+          res.status(500).json({ error: 'Stream failed' });
         }
-      });
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
 
-      yt2.on('error', (e) => {
-        if (!headersSent) res.status(500).json({ error: e.message });
-      });
+    yt.on('error', () => cleanup());
 
-      return;
-    }
-    res.end();
-  });
+    // Client disconnect
+    req.on('close', () => { yt.kill(); cleanup(); });
 
-  yt.on('error', (e) => {
-    if (!headersSent) res.status(500).json({ error: e.message });
-  });
+    // Timeout 3 menit
+    req.setTimeout(180000, () => { yt.kill(); cleanup(); });
+  };
 
-  // Timeout
-  req.setTimeout(180000, () => {
-    yt.kill();
-    if (!res.headersSent) res.status(504).end();
-  });
+  spawnStream('18/bestaudio/best');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
