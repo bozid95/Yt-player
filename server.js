@@ -35,6 +35,23 @@ if (fs.existsSync(COOKIE_PATH)) {
   console.warn('[WARN] Tidak ada cookies — streaming mungkin gagal');
 }
 
+// ─── Search suggestions ──────────────────────────────────────────
+app.get('/api/suggest', (req, res) => {
+  const q = req.query.q;
+  if (!q || q.length < 1) return res.json([]);
+  const sanitized = encodeURIComponent(q);
+  https.get(`https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${sanitized}`, (r) => {
+    let data = '';
+    r.on('data', c => data += c);
+    r.on('end', () => {
+      try {
+        const parsed = JSON.parse(data);
+        res.json(parsed[1] || []);
+      } catch { res.json([]); }
+    });
+  }).on('error', () => res.json([]));
+});
+
 // ─── Search YouTube ──────────────────────────────────────────────
 app.get('/api/search', (req, res) => {
   const q = req.query.q;

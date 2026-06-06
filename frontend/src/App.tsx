@@ -46,6 +46,9 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('all')
   const [shuffle, setShuffle] = useState(false)
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const searchRef = useRef<HTMLDivElement>(null)
 
   // ─── Local history ──────────────────────────────────────────────────
   const [history, setHistory] = useState<Track[]>(() => {
@@ -246,6 +249,32 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [togglePlay, nextTrack, prevTrack])
 
+  // ─── Search suggestions ──────────────────────────────────────────
+  useEffect(() => {
+    if (query.length < 1) { setSuggestions([]); setShowSuggestions(false); return }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/suggest?q=${encodeURIComponent(query)}`)
+        if (res.ok) {
+          const data: string[] = await res.json()
+          setSuggestions(data.slice(0, 6))
+          setShowSuggestions(data.length > 0)
+        }
+      } catch {}
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  // Tutup suggestions kalau klik di luar
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node))
+        setShowSuggestions(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
   // ─── Format ────────────────────────────────────────────────────
   const fmt = (s: number) => {
     const m = Math.floor(s / 60)
@@ -282,14 +311,28 @@ export default function App() {
           </div>
 
           {/* Search */}
-          <div className="relative mb-4">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <div className="relative mb-4" ref={searchRef}>
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
             <input type="search" placeholder="Cari lagu..."
               value={query}
               onChange={e => setQuery(e.target.value)}
+              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
               autoComplete="off"
               enterKeyHint="search"
               className="w-full h-12 pl-10 pr-4 rounded-xl border border-input bg-card text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring transition-all" />
+
+            {/* Suggestions dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                {suggestions.map((s, i) => (
+                  <button key={i} onMouseDown={e => { e.preventDefault(); setQuery(s); setShowSuggestions(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-accent transition-colors">
+                    <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    <span className="truncate">{s}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Error */}
