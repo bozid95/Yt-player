@@ -149,8 +149,21 @@ app.get('/api/stream/:id', (req, res) => {
 
   const url = `https://youtube.com/watch?v=${id}`;
   let headersSent = false;
+  let finished = false;
 
-  const cleanup = () => { if (!headersSent && !res.writableEnded) { try { res.end(); } catch {} } };
+  const cleanup = () => {
+    if (!finished) {
+      finished = true;
+      if (!res.writableEnded) { try { res.end(); } catch {} }
+    }
+  };
+
+  const sendJson = (code, data) => {
+    if (!headersSent && !finished && !res.writableEnded) {
+      finished = true;
+      res.status(code).json(data);
+    }
+  };
 
   const spawnStream = (format) => {
     const yt = spawn('yt-dlp', [
@@ -164,35 +177,32 @@ app.get('/api/stream/:id', (req, res) => {
     ]);
 
     yt.stdout.on('data', (chunk) => {
-      if (!headersSent) {
+      if (!headersSent && !finished) {
         res.setHeader('Content-Type', format === '18/bestaudio/best' ? 'video/mp4' : 'audio/webm');
         res.setHeader('Cache-Control', 'public, max-age=3600');
         res.setHeader('Accept-Ranges', 'none');
         headersSent = true;
       }
-      res.write(chunk);
+      if (!finished) res.write(chunk);
     });
 
-    yt.stderr.on('data', () => {}); // silent
+    yt.stderr.on('data', () => {});
 
     yt.on('close', (code) => {
-      if (!headersSent) {
+      if (!headersSent && !finished) {
         if (format === '18/bestaudio/best') {
-          spawnStream('best'); // fallback
+          spawnStream('best');
         } else {
-          res.status(500).json({ error: 'Stream failed' });
+          sendJson(500, { error: 'Stream failed' });
         }
-      } else if (!res.writableEnded) {
-        res.end();
+      } else {
+        cleanup();
       }
     });
 
     yt.on('error', () => cleanup());
 
-    // Client disconnect
     req.on('close', () => { yt.kill(); cleanup(); });
-
-    // Timeout 3 menit
     req.setTimeout(180000, () => { yt.kill(); cleanup(); });
   };
 
