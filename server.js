@@ -112,6 +112,58 @@ app.get('/api/info/:id', (req, res) => {
   }
 });
 
+// ─── Related / Mix (autoplay recommendations) ────────────────────
+app.get('/api/related/:id', (req, res) => {
+  const id = req.params.id;
+  if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
+
+  // Coba YouTube Music mix dulu, fallback ke YouTube regular mix
+  const mixUrl = `https://music.youtube.com/watch?v=${id}&list=RDAMVM${id}`;
+  try {
+    const result = execSync(
+      `yt-dlp --cookies ${COOKIE_PATH} --flat-playlist --dump-json --no-warnings "${mixUrl}" 2>/dev/null`,
+      { timeout: 15000, maxBuffer: 1024 * 1024 }
+    );
+    const lines = result.toString().trim().split('\n').filter(Boolean);
+    const items = lines.map(l => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+
+    // Skip the first item (it's the same video), max 15 recommendations
+    const related = items.slice(1, 16).map(item => ({
+      id: item.id,
+      title: item.title || 'Unknown',
+      duration: item.duration || 0,
+      thumbnail: `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
+      channel: item.channel || item.uploader || 'Unknown',
+    }));
+    res.json(related);
+  } catch {
+    // Fallback: coba YouTube regular mix
+    try {
+      const fallbackUrl = `https://www.youtube.com/watch?v=${id}&list=RD${id}`;
+      const result = execSync(
+        `yt-dlp --cookies ${COOKIE_PATH} --flat-playlist --dump-json --no-warnings "${fallbackUrl}" 2>/dev/null`,
+        { timeout: 15000, maxBuffer: 1024 * 1024 }
+      );
+      const lines = result.toString().trim().split('\n').filter(Boolean);
+      const items = lines.map(l => {
+        try { return JSON.parse(l); } catch { return null; }
+      }).filter(Boolean);
+      const related = items.slice(1, 16).map(item => ({
+        id: item.id,
+        title: item.title || 'Unknown',
+        duration: item.duration || 0,
+        thumbnail: `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
+        channel: item.channel || item.uploader || 'Unknown',
+      }));
+      res.json(related);
+    } catch (e) {
+      res.json([]); // Gak ada rekomendasi
+    }
+  }
+});
+
 // ─── Stream audio via yt-dlp pipe ────────────────────────────────
 app.get('/api/stream/:id', (req, res) => {
   const id = req.params.id;

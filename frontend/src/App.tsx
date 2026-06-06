@@ -50,6 +50,7 @@ export default function App() {
   const [seekTime, setSeekTime] = useState(0)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [related, setRelated] = useState<Track[]>([])
   const searchRef = useRef<HTMLDivElement>(null)
 
   // ─── Local history ──────────────────────────────────────────────────
@@ -89,6 +90,10 @@ export default function App() {
     audio.src = `/api/stream/${queue[i].id}`
     audio.load()
     saveToHistory(queue[i])
+    // Fetch rekomendasi (mix YouTube)
+    fetch(`/api/related/${queue[i].id}`).then(r => r.ok && r.json()).then(d => {
+      if (Array.isArray(d)) setRelated(d)
+    }).catch(() => {})
     // Tunggu audio siap, baru play
     const onReady = () => {
       audio.removeEventListener('canplay', onReady)
@@ -127,14 +132,25 @@ export default function App() {
   const nextTrack = useCallback(() => {
     if (queue.length === 0) return
     if (repeatMode === 'one') {
-      playTrack(currentIdxRef.current) // repeat satu lagu
+      playTrack(currentIdxRef.current)
       return
     }
     const next = currentIdxRef.current + 1
     if (next < queue.length) playTrack(next)
-    else if (repeatMode === 'all') playTrack(0) // ulang dari awal
-    else { setPlaying(false); setProgress(0) }
-  }, [queue.length, repeatMode, playTrack])
+    else if (repeatMode === 'all') playTrack(0)
+    else if (related.length > 0) {
+      // Append rekomendasi ke queue, skip duplikat
+      const fresh = related.filter(t => !queue.find(x => x.id === t.id))
+      if (fresh.length > 0) {
+        setQueue(prev => [...prev, ...fresh])
+        setTimeout(() => playTrack(next), 50)
+      } else {
+        setPlaying(false); setProgress(0)
+      }
+    } else {
+      setPlaying(false); setProgress(0)
+    }
+  }, [queue.length, repeatMode, playTrack, related, queue])
 
   const prevTrack = useCallback(() => {
     const audio = audioRef.current
@@ -576,6 +592,35 @@ export default function App() {
                     className="w-20 h-1 accent-primary cursor-pointer" />
                 </div>
               </div>
+
+              {/* Selanjutnya (rekomendasi) */}
+              {related.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Selanjutnya</h3>
+                  <div className="space-y-1 max-h-[160px] overflow-y-auto">
+                    {related.slice(0, 8).map(t => (
+                      <button key={t.id} onClick={() => {
+                        setQueue(prev => {
+                          const filtered = prev.filter(x => x.id !== t.id)
+                          return [...filtered, t]
+                        })
+                        setTimeout(() => {
+                          const idx = queue.length
+                          playTrack(idx)
+                        }, 50)
+                      }}
+                        className="w-full flex items-center gap-2.5 p-2 rounded-lg text-left hover:bg-accent transition-colors min-h-[48px]">
+                        <img src={t.thumbnail} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0 bg-muted"
+                          onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect fill="%23e0e0e0" width="36" height="36"/></svg>')} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium leading-snug line-clamp-1">{t.title}</div>
+                          <div className="text-[11px] text-muted-foreground">{t.channel}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
       </div>
       )}
