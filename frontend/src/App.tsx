@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Search, Play, Pause, SkipBack, SkipForward, Volume2, Download, Music2, Repeat, Repeat1 } from 'lucide-react'
+import { Search, Play, Pause, SkipBack, SkipForward, Volume2, Download, Music2, Repeat, Repeat1, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Track = { id: string; title: string; channel: string; thumbnail: string; duration: number }
@@ -58,6 +58,7 @@ export default function App() {
     currentIdxRef.current = i
     setPlaying(true)
     setError('')
+    setShowPlayer(true) // otomatis buka player view
     const audio = audioRef.current
     if (!audio) return
     audio.src = `/api/stream/${queue[i].id}`
@@ -216,92 +217,176 @@ export default function App() {
   const dur = (s: number) => s && !isNaN(s) ? fmt(s) : '?'
 
   const current = idx >= 0 ? queue[idx] : null
+  const [showPlayer, setShowPlayer] = useState(false)
 
   return (
-    <div className="min-h-screen bg-background text-foreground pb-36">
+    <div className="min-h-screen bg-background text-foreground pb-4">
       <div className="max-w-xl mx-auto px-4 py-6">
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/30">
-              <Music2 className="w-5 h-5 text-primary-foreground" />
+        {/* ── SEARCH VIEW ────────────────────────────────────────── */}
+        {!showPlayer && (<>
+          {/* ── Header ─────────────────────────────────────────────── */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/30">
+                <Music2 className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <h1 className="text-xl font-bold tracking-tight">
+                <span className="text-primary">YT</span> Player
+              </h1>
             </div>
-            <h1 className="text-xl font-bold tracking-tight">
-              <span className="text-primary">YT</span> Player
-            </h1>
-          </div>
-          {(installPrompt || (isIOS && !isStandalone)) && (
-            <button onClick={handleInstall}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border border-primary/30 text-primary bg-primary/10 hover:bg-primary/20 transition-all active:scale-95">
-              <Download className="w-3.5 h-3.5" /> Install
-            </button>
-          )}
-        </div>
-
-        {/* ── Search ──────────────────────────────────────────────── */}
-        <div className="relative mb-5">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          <input type="text" placeholder="Cari lagu..."
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            className="w-full h-11 pl-10 pr-4 rounded-xl border border-input bg-card text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring transition-all" />
-        </div>
-
-        {/* ── Error ───────────────────────────────────────────────── */}
-        {error && (
-          <div className="mb-3 px-4 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20 flex items-center gap-2">
-            <span>{error}</span>
-            <button onClick={() => setError('')} className="ml-auto text-destructive/60 hover:text-destructive">✕</button>
-          </div>
-        )}
-
-        {/* ── Results ─────────────────────────────────────────────── */}
-        {loading ? (
-          <div className="text-center text-muted-foreground py-16">
-            <div className="inline-block w-6 h-6 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin mb-3" />
-            <p className="text-sm">Mencari...</p>
-          </div>
-        ) : tracks.length > 0 ? (
-          <div className="space-y-1.5">
-            {tracks.map((t, i) => (
-              <button key={t.id} onClick={() => { if (idx === i) togglePlay(); else playTrack(i) }}
-                className={cn(
-                  "w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all",
-                  idx === i
-                    ? "bg-primary/10 border border-primary/30 shadow-sm"
-                    : "hover:bg-accent border border-transparent"
-                )}>
-                <img src={t.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover flex-shrink-0 bg-muted shadow-sm"
-                  onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect fill="%23333" width="56" height="56"/></svg>')} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium leading-snug line-clamp-2">{t.title}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{t.channel} · {dur(t.duration)}</div>
-                </div>
-                <div className={cn("w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
-                  idx === i && playing ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
-                )}>
-                  {idx === i && playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </div>
+            {(installPrompt || (isIOS && !isStandalone)) && (
+              <button onClick={handleInstall}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border border-primary/30 text-primary bg-primary/10 hover:bg-primary/20 transition-all active:scale-95">
+                <Download className="w-3.5 h-3.5" /> Install
               </button>
-            ))}
+            )}
           </div>
-        ) : query.length >= 2 ? (
-          <div className="text-center text-muted-foreground py-16">
-            <p className="text-lg">😕</p>
-            <p className="text-sm mt-2">Tidak ditemukan</p>
+
+          {/* ── Search ──────────────────────────────────────────────── */}
+          <div className="relative mb-5">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <input type="text" placeholder="Cari lagu..."
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              className="w-full h-11 pl-10 pr-4 rounded-xl border border-input bg-card text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring transition-all" />
           </div>
-        ) : (
-          <div className="text-center text-muted-foreground py-16">
-            <Music2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Cari lagu favorit Anda</p>
+
+          {/* ── Error ───────────────────────────────────────────────── */}
+          {error && (
+            <div className="mb-3 px-4 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20 flex items-center gap-2">
+              <span>{error}</span>
+              <button onClick={() => setError('')} className="ml-auto text-destructive/60 hover:text-destructive">✕</button>
+            </div>
+          )}
+
+          {/* ── Results ─────────────────────────────────────────────── */}
+          {loading ? (
+            <div className="text-center text-muted-foreground py-16">
+              <div className="inline-block w-6 h-6 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin mb-3" />
+              <p className="text-sm">Mencari...</p>
+            </div>
+          ) : tracks.length > 0 ? (
+            <div className="space-y-1.5">
+              {tracks.map((t, i) => (
+                <button key={t.id} onClick={() => { if (idx === i) togglePlay(); else playTrack(i) }}
+                  className={cn(
+                    "w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all",
+                    idx === i
+                      ? "bg-primary/10 border border-primary/30 shadow-sm"
+                      : "hover:bg-accent border border-transparent"
+                  )}>
+                  <img src={t.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover flex-shrink-0 bg-muted shadow-sm"
+                    onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect fill="%23333" width="56" height="56"/></svg>')} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium leading-snug line-clamp-2">{t.title}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{t.channel} · {dur(t.duration)}</div>
+                  </div>
+                  <div className={cn("w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
+                    idx === i && playing ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
+                  )}>
+                    {idx === i && playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : query.length >= 2 ? (
+            <div className="text-center text-muted-foreground py-16">
+              <p className="text-lg">😕</p>
+              <p className="text-sm mt-2">Tidak ditemukan</p>
+            </div>
+          ) : (
+            <div className="text-center text-muted-foreground py-16">
+              <Music2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Cari lagu favorit Anda</p>
+            </div>
+          )}
+        </>)}
+
+        {/* ── PLAYER VIEW (FULL SCREEN) ──────────────────────────────── */}
+        {showPlayer && current && (
+          <div className="flex flex-col items-center min-h-[calc(100vh-4rem)] justify-between py-4">
+
+            {/* Close / back to list */}
+            <div className="w-full flex items-center justify-between mb-2">
+              <button onClick={() => setShowPlayer(false)}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                <ChevronDown className="w-5 h-5" /> Daftar
+              </button>
+              <button onClick={() => setRepeatMode(r => r === 'none' ? 'all' : r === 'all' ? 'one' : 'none')}
+                className={cn("flex items-center gap-1 text-xs transition-all",
+                  repeatMode !== 'none' ? "text-primary" : "text-muted-foreground")}>
+                {repeatMode === 'one' ? <Repeat1 className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
+                <span>{repeatMode === 'one' ? '1x' : repeatMode === 'all' ? 'All' : 'Off'}</span>
+              </button>
+            </div>
+
+            {/* Album art */}
+            <div className="w-full max-w-sm aspect-square rounded-2xl overflow-hidden shadow-2xl ring-1 ring-border/30 mb-6">
+              <img src={current.thumbnail} alt=""
+                className="w-full h-full object-cover"
+                onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect fill="%23222" width="400" height="400"/><text x="200" y="220" text-anchor="middle" font-size="80" fill="%23666">🎵</text></svg>')} />
+            </div>
+
+            {/* Song info */}
+            <div className="w-full text-center mb-6">
+              <h2 className="text-xl font-bold leading-tight line-clamp-2">{current.title}</h2>
+              <p className="text-sm text-muted-foreground mt-1.5">{current.channel}</p>
+            </div>
+
+            {/* Progress */}
+            <div className="w-full mb-4">
+              <div ref={progressRef} onClick={seek}
+                className="w-full h-2 bg-muted rounded-full cursor-pointer relative overflow-hidden group">
+                <div className="h-full bg-primary rounded-full transition-[width] duration-300 ease-linear group-hover:brightness-110"
+                  style={{ width: `${progress}%` }} />
+                <div className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-primary rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ left: `calc(${progress}% - 7px)` }} />
+              </div>
+              <div className="flex justify-between text-xs text-muted-foreground mt-1.5 px-0.5">
+                <span>{fmt(currentTime)}</span>
+                <span>{fmt(duration)}</span>
+              </div>
+            </div>
+
+            {/* Main controls */}
+            <div className="w-full flex items-center justify-center gap-6 mb-6">
+              <button onClick={prevTrack}
+                className="text-muted-foreground hover:text-foreground transition-colors active:scale-90 p-2">
+                <SkipBack className="w-6 h-6" />
+              </button>
+
+              <button onClick={togglePlay}
+                className="w-16 h-16 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl shadow-primary/40 active:scale-90 transition-all hover:bg-primary/90">
+                {playing ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-0.5" />}
+              </button>
+
+              <button onClick={nextTrack}
+                className="text-muted-foreground hover:text-foreground transition-colors active:scale-90 p-2">
+                <SkipForward className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Volume + queue */}
+            <div className="w-full flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Volume2 className="w-4 h-4 text-muted-foreground" />
+                <input type="range" min="0" max="100" value={volume}
+                  onChange={e => { const v = +e.target.value; setVolume(v); if (audioRef.current) audioRef.current.volume = v / 100 }}
+                  className="w-24 sm:w-32 h-1 accent-primary cursor-pointer" />
+              </div>
+              <span className="text-xs text-muted-foreground">{queue.length} lagu</span>
+            </div>
           </div>
         )}
+
       </div>
 
-      {/* ── Now Playing Bar ───────────────────────────────────────── */}
-      {current && (
-        <div className="fixed bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur-xl px-4 py-3 shadow-2xl z-50">
+      {/* ── Now Playing Bar (mini, only when NOT in player view) ─── */}
+      {current && !showPlayer && (
+        <div onClick={() => setShowPlayer(true)}
+          className="fixed bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur-xl px-4 py-3 shadow-2xl z-50 cursor-pointer active:scale-[0.99] transition-transform">
+
           {/* Info */}
           <div className="flex items-center gap-3 mb-2.5">
             <img src={current.thumbnail} className="w-11 h-11 rounded-lg object-cover flex-shrink-0 shadow-md" alt="" />
@@ -309,55 +394,19 @@ export default function App() {
               <div className="text-sm font-semibold truncate">{current.title}</div>
               <div className="text-xs text-muted-foreground truncate">{current.channel}</div>
             </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <button onClick={e => { e.stopPropagation(); togglePlay() }}
+                className="w-10 h-10 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-md active:scale-90 transition-all">
+                {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              </button>
+              <ChevronUp className="w-5 h-5 text-muted-foreground" />
+            </div>
           </div>
 
           {/* Progress */}
-          <div className="mb-2.5">
-            <div ref={progressRef} onClick={seek}
-              className="w-full h-1.5 bg-muted rounded-full cursor-pointer relative overflow-hidden">
-              <div className="h-full bg-primary rounded-full transition-[width] duration-300 ease-linear"
-                style={{ width: `${progress}%` }} />
-            </div>
-            <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
-              <span>{fmt(currentTime)}</span>
-              <span>{fmt(duration)}</span>
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button onClick={prevTrack}
-                className="text-muted-foreground hover:text-foreground transition-colors active:scale-90">
-                <SkipBack className="w-5 h-5" />
-              </button>
-
-              <button onClick={togglePlay}
-                className="w-12 h-12 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-lg shadow-primary/30 active:scale-90 transition-all hover:bg-primary/90">
-                {playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-              </button>
-
-              <button onClick={nextTrack}
-                className="text-muted-foreground hover:text-foreground transition-colors active:scale-90">
-                <SkipForward className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3">
-              {/* Repeat */}
-              <button onClick={() => setRepeatMode(r => r === 'none' ? 'all' : r === 'all' ? 'one' : 'none')}
-                className={cn("transition-all active:scale-90",
-                  repeatMode !== 'none' ? "text-primary" : "text-muted-foreground hover:text-foreground")}
-                title={repeatMode === 'one' ? 'Repeat 1' : repeatMode === 'all' ? 'Repeat all' : 'No repeat'}>
-                {repeatMode === 'one' ? <Repeat1 className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
-              </button>
-
-              {/* Volume */}
-              <Volume2 className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <input type="range" min="0" max="100" value={volume}
-                onChange={e => { const v = +e.target.value; setVolume(v); if (audioRef.current) audioRef.current.volume = v / 100 }}
-                className="w-16 sm:w-20 h-1 accent-primary cursor-pointer" />
-            </div>
+          <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-primary rounded-full transition-[width] duration-300 ease-linear"
+              style={{ width: `${progress}%` }} />
           </div>
         </div>
       )}
