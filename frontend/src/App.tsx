@@ -120,7 +120,6 @@ export default function App() {
     const onPlay = () => setPlaying(true)
     const onPause = () => setPlaying(false)
     const onWait = () => {}
-    const onCanPlay = () => { if (playing) audio.play().catch(() => {}) }
 
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onMeta)
@@ -129,7 +128,6 @@ export default function App() {
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
     audio.addEventListener('waiting', onWait)
-    audio.addEventListener('canplay', onCanPlay)
     audio.volume = volume / 100
 
     return () => {
@@ -140,9 +138,8 @@ export default function App() {
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('waiting', onWait)
-      audio.removeEventListener('canplay', onCanPlay)
     }
-  }, [nextTrack, duration, playing, volume])
+  }, [nextTrack, duration, volume]) // ← hapus 'playing' dari deps
 
   // ─── Media Session API (lock screen) ─────────────────────────────
   useEffect(() => {
