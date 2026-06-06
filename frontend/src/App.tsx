@@ -50,10 +50,12 @@ export default function App() {
   const progressRef = useRef<HTMLDivElement>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const currentIdxRef = useRef(-1)
+  const loadingRef = useRef(false)
 
   // ─── Play / Pause / Next / Prev ───────────────────────────────────
   const playTrack = useCallback((i: number) => {
     if (i < 0 || i >= queue.length) return
+    loadingRef.current = true
     setIdx(i)
     currentIdxRef.current = i
     setPlaying(true)
@@ -63,7 +65,26 @@ export default function App() {
     if (!audio) return
     audio.src = `/api/stream/${queue[i].id}`
     audio.load()
-    audio.play().catch(e => setError('Gagal play: ' + e.message))
+    // Tunggu audio siap, baru play
+    const onReady = () => {
+      audio.removeEventListener('canplay', onReady)
+      if (currentIdxRef.current === i) {
+        audio.play().catch(e => {
+          // Abaikan error "interrupted" — berarti lagu baru sedang dimuat
+          if (e.message.includes('interrupted')) return
+          setError('Gagal play: ' + e.message)
+        })
+      }
+      loadingRef.current = false
+    }
+    audio.addEventListener('canplay', onReady)
+    // Fallback: coba play langsung (sebagian browser langsung siap)
+    setTimeout(() => {
+      if (loadingRef.current && currentIdxRef.current === i) {
+        audio.play().catch(() => {})
+        loadingRef.current = false
+      }
+    }, 500)
   }, [queue])
 
   const togglePlay = useCallback(() => {
