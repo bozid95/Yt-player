@@ -233,6 +233,40 @@ progressBar.addEventListener('click', (e) => {
 volSlider.addEventListener('input', () => { audio.volume = volSlider.value / 100; });
 audio.volume = 0.8;
 
+// ─── Media Session (lock screen controls) ─────────────────────────
+function updateMediaSession(item) {
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: item.title,
+      artist: item.channel,
+      album: 'YT Player',
+      artwork: [
+        { src: item.thumbnail, sizes: '320x180', type: 'image/jpeg' },
+      ]
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  }
+}
+
+// Handler lock screen controls
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.setActionHandler('play', () => audio.play().catch(()=>{}));
+  navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+  navigator.mediaSession.setActionHandler('previoustrack', () => prevBtn.click());
+  navigator.mediaSession.setActionHandler('nexttrack', () => nextBtn.click());
+  navigator.mediaSession.setActionHandler('seekforward', () => { audio.currentTime = Math.min(audio.currentTime + 10, audio.duration); });
+  navigator.mediaSession.setActionHandler('seekbackward', () => { audio.currentTime = Math.max(audio.currentTime - 10, 0); });
+  navigator.mediaSession.setActionHandler('seekto', (d) => { if (d.seekTime) audio.currentTime = d.seekTime; });
+}
+
+// Update Media Session metadata when playing
+const origPlayIndex = playIndex;
+playIndex = async function(idx) {
+  await origPlayIndex(idx);
+  const item = queue[idx];
+  if (item) updateMediaSession(item);
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────
 function fmtDur(s) { if (!s||isNaN(s)) return '?'; const m=Math.floor(s/60), sc=Math.floor(s%60); return m+':'+String(sc).padStart(2,'0'); }
 function fmtTime(s) { if (!s||isNaN(s)) return '0:00'; const m=Math.floor(s/60), sc=Math.floor(s%60); return m+':'+String(sc).padStart(2,'0'); }

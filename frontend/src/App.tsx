@@ -143,6 +143,34 @@ export default function App() {
     }
   }, [nextTrack, duration, playing, volume])
 
+  // ─── Media Session API (lock screen) ─────────────────────────────
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    const track = queue[idx]
+    if (track) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title,
+        artist: track.channel,
+        album: 'YT Player',
+        artwork: [{ src: track.thumbnail, sizes: '320x180', type: 'image/jpeg' }],
+      })
+      navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'
+    }
+    navigator.mediaSession.setActionHandler('play', () => togglePlay())
+    navigator.mediaSession.setActionHandler('pause', () => togglePlay())
+    navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack())
+    navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack())
+    navigator.mediaSession.setActionHandler('seekforward', () => {
+      const a = audioRef.current; if (a) a.currentTime = Math.min(a.currentTime + 10, a.duration)
+    })
+    navigator.mediaSession.setActionHandler('seekbackward', () => {
+      const a = audioRef.current; if (a) a.currentTime = Math.max(a.currentTime - 10, 0)
+    })
+    navigator.mediaSession.setActionHandler('seekto', (d) => {
+      if (d.seekTime) { const a = audioRef.current; if (a) a.currentTime = d.seekTime }
+    })
+  }, [idx, queue, playing, togglePlay, prevTrack, nextTrack])
+
   // ─── Search ───────────────────────────────────────────────────────
   const doSearch = useCallback(async (q: string) => {
     if (q.length < 2) return
