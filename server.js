@@ -119,27 +119,32 @@ app.get('/api/related/:id', (req, res) => {
   const hit = cached(cacheKey, 10 * 60 * 1000); // 10 menit
   if (hit) return res.json(hit);
 
-  const tryMix = (url) => {
-    try {
-      const result = execSync(
-        `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings '${url}' 2>/dev/null`,
-        { timeout: 10000, maxBuffer: 512 * 1024 }
-      );
-      const items = parseYtLines(result).slice(1, 16);
-      setCache(cacheKey, items);
-      return res.json(items);
-    } catch { return null; }
+  const tryMix = (url, done) => {
+    const child = exec(
+      `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings '${url}' 2>/dev/null`,
+      { timeout: 10000, maxBuffer: 512 * 1024 },
+      (err, stdout) => {
+        if (err) return done(null);
+        const items = parseYtLines(stdout);
+        if (items.length > 1) {
+          setCache(cacheKey, items.slice(1, 16));
+          return done(items.slice(1, 16));
+        }
+        done(null);
+      }
+    );
+    // Kill yt-dlp kalo request dibatalin
+    req.on('close', () => { child.kill(); if (!res.headersSent) res.json([]); });
   };
 
-  // Coba YouTube Music mix dulu
   const musicUrl = `https://music.youtube.com/watch?v=${id}&list=RDAMVM${id}`;
-  const result = tryMix(musicUrl);
-  if (result === null) {
-    // Fallback: YouTube regular mix
+  tryMix(musicUrl, (result) => {
+    if (result) return res.json(result);
     const fallbackUrl = `https://www.youtube.com/watch?v=${id}&list=RD${id}`;
-    const fallback = tryMix(fallbackUrl);
-    if (fallback === null) res.json([]);
-  }
+    tryMix(fallbackUrl, (fallback) => {
+      res.json(fallback || []);
+    });
+  });
 });
 
 // ─── Stream audio via yt-dlp pipe ────────────────────────────────
