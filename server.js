@@ -187,12 +187,18 @@ const AUDIO_FMT = '140';
 const CACHE_DIR = '/tmp/yt-cache';
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
+// Track download yang masih berlangsung
+const downloading = new Set();
+
 // Bersihin file > 10 menit
 setInterval(() => {
   try {
     const now = Date.now();
     for (const f of fs.readdirSync(CACHE_DIR)) {
       const p = path.join(CACHE_DIR, f);
+      const id = f.replace('.m4a', '');
+      // Skip file yang masih di-download
+      if (downloading.has(id)) continue;
       const st = fs.statSync(p);
       if (now - st.mtimeMs > 10 * 60 * 1000) fs.unlinkSync(p);
     }
@@ -206,26 +212,36 @@ app.get('/api/stream/:id', (req, res) => {
   const filePath = path.join(CACHE_DIR, `${id}.m4a`);
   const range = req.headers.range;
 
-  // ── FILE SUDAH ADA → serve dengan Range support ──────────────
+  // ── FILE SUDAH ADA & ADA ISINYA → serve cache ────────────────
   if (fs.existsSync(filePath)) {
     const stat = fs.statSync(filePath);
     const fileSize = stat.size;
 
-    if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunkSize = end - start + 1;
+    // File baru 0 bytes (yt-dlp lagi ekstraksi) → skip, biar start stream baru
+    if (fileSize > 0) {
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = Math.min(
+          parts[1] ? parseInt(parts[1], 10) : fileSize - 1,
+          fileSize - 1
+        );
+        const chunkSize = end - start + 1;
 
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Type': 'audio/mp4',
-        'Content-Length': chunkSize,
-        'Cache-Control': 'public, max-age=3600',
-      });
-      fs.createReadStream(filePath, { start, end }).pipe(res);
-    } else {
+        if (chunkSize > 0 && start < fileSize) {
+          res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Type': 'audio/mp4',
+            'Content-Length': chunkSize,
+            'Cache-Control': 'public, max-age=3600',
+          });
+          fs.createReadStream(filePath, { start, end }).pipe(res);
+          return;
+        }
+      }
+
+      // File ada — serve full (baik dari cache lengkap atau partial)
       res.writeHead(200, {
         'Content-Type': 'audio/mp4',
         'Content-Length': fileSize,
@@ -233,14 +249,34 @@ app.get('/api/stream/:id', (req, res) => {
         'Cache-Control': 'public, max-age=3600',
       });
       fs.createReadStream(filePath).pipe(res);
+      return;
     }
-    return;
   }
 
-  // ── PERTAMA KALI → stream + simpan simultan ──────────────────
+  // ── PERTAMA KALI atau file masih kosong → stream + simpan ────
   try {
     // Pastikan cache dir ada
     try { if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
+
+    // Cegah start yt-dlp kedua buat ID yang sama
+    if (downloading.has(id) && fs.existsSync(filePath)) {
+      const sz = fs.statSync(filePath).size;
+      if (sz > 0) {
+        // Serve dari partial cache — browser bisa seek seadanya
+        res.writeHead(200, {
+          'Content-Type': 'audio/mp4',
+          'Content-Length': sz,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        fs.createReadStream(filePath).pipe(res);
+        return;
+      }
+      // File 0 bytes → biar browser retry sendiri
+      res.status(204).end();
+      return;
+    }
+    downloading.add(id);
 
     const yt = spawn('yt-dlp', [
       ...YTDLP_ARGS,
@@ -271,6 +307,7 @@ app.get('/api/stream/:id', (req, res) => {
     yt.stderr.on('data', () => {});
 
     yt.on('close', () => {
+      downloading.delete(id);
       writeStream.end();
       if (!headersSent) {
         // yt-dlp gagal — hapus cache
