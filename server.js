@@ -1,5 +1,5 @@
 const express = require('express');
-const { exec, execSync, spawn } = require('child_process');
+const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
@@ -87,7 +87,7 @@ app.get('/api/suggest', (req, res) => {
   }).on('error', () => res.json([]));
 });
 
-// ─── Search YouTube (cached 5 menit) ────────────────────────────
+// ─── Search YouTube (cached 5 menit, async biar gak blocking) ──
 app.get('/api/search', (req, res) => {
   const q = req.query.q;
   if (!q || q.length < 2) return res.json([]);
@@ -96,18 +96,21 @@ app.get('/api/search', (req, res) => {
   const hit = cached(cacheKey);
   if (hit) return res.json(hit);
 
-  try {
-    const result = execSync(
-      `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings 'ytsearch10:${q.replace(/'/g, "'\\''")}' 2>/dev/null`,
-      { timeout: 15000, maxBuffer: 512 * 1024 }
-    );
-    const items = parseYtLines(result);
-    setCache(cacheKey, items);
-    res.json(items);
-  } catch (e) {
-    console.error('Search error:', e.message);
-    res.status(500).json({ error: 'Search gagal, coba lagi' });
-  }
+  const child = exec(
+    `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings 'ytsearch10:${q.replace(/'/g, "'\\''")}' 2>/dev/null`,
+    { timeout: 15000, maxBuffer: 512 * 1024 },
+    (err, stdout) => {
+      if (err) {
+        console.error('Search error:', err.message);
+        if (!res.headersSent) return res.status(500).json({ error: 'Search gagal, coba lagi' });
+        return;
+      }
+      const items = parseYtLines(stdout);
+      setCache(cacheKey, items);
+      if (!res.headersSent) res.json(items);
+    }
+  );
+  req.on('close', () => { if (child.exitCode === null) child.kill(); });
 });
 
 // ─── Related / Mix (cached 10 menit) ────────────────────────────

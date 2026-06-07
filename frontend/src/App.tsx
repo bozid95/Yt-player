@@ -131,26 +131,32 @@ export default function App() {
 
   const nextTrack = useCallback(() => {
     if (queue.length === 0) return
-    if (repeatMode === 'one') {
-      playTrack(currentIdxRef.current)
-      return
-    }
+    const audio = audioRef.current
+    if (repeatMode === 'one') { playTrack(currentIdxRef.current); return }
     const next = currentIdxRef.current + 1
-    if (next < queue.length) playTrack(next)
-    else if (repeatMode === 'all') playTrack(0)
-    else if (related.length > 0) {
-      // Append rekomendasi ke queue, skip duplikat
+    if (next < queue.length) { playTrack(next); return }
+    if (repeatMode === 'all' && related.length === 0) { playTrack(0); return }
+    if (related.length > 0) {
+      // Ambil fresh dari related (skip duplikat & yg udah ada di queue)
       const fresh = related.filter(t => !queue.find(x => x.id === t.id))
       if (fresh.length > 0) {
-        setQueue(prev => [...prev, ...fresh])
-        setTimeout(() => playTrack(next), 50)
-      } else {
-        setPlaying(false); setProgress(0)
+        const newQueue = [...queue, ...fresh]
+        const playIdx = queue.length // index pertama dari fresh
+        setQueue(newQueue)
+        currentIdxRef.current = playIdx
+        setIdx(playIdx)
+        setPlaying(true)
+        setError('')
+        if (audio) {
+          audio.src = `/api/stream/${newQueue[playIdx].id}`
+          audio.load()
+        }
+        saveToHistory(newQueue[playIdx])
+        return
       }
-    } else {
-      setPlaying(false); setProgress(0)
     }
-  }, [queue.length, repeatMode, playTrack, related, queue])
+    setPlaying(false); setProgress(0)
+  }, [queue, repeatMode, related, playTrack, saveToHistory])
 
   const prevTrack = useCallback(() => {
     const audio = audioRef.current
@@ -595,12 +601,22 @@ export default function App() {
                       <button key={t.id} onClick={() => {
                         setQueue(prev => {
                           const filtered = prev.filter(x => x.id !== t.id)
-                          return [...filtered, t]
+                          const newQueue = [...filtered, t]
+                          // Play langsung index terakhir
+                          setTimeout(() => {
+                            const audio = audioRef.current
+                            currentIdxRef.current = newQueue.length - 1
+                            setIdx(newQueue.length - 1)
+                            setPlaying(true)
+                            setError('')
+                            if (audio) {
+                              audio.src = `/api/stream/${newQueue[newQueue.length - 1].id}`
+                              audio.load()
+                            }
+                            saveToHistory(t)
+                          }, 0)
+                          return newQueue
                         })
-                        setTimeout(() => {
-                          const idx = queue.length
-                          playTrack(idx)
-                        }, 50)
                       }}
                         className="w-full flex items-center gap-2.5 p-2 rounded-lg text-left hover:bg-accent transition-colors min-h-[48px]">
                         <img src={t.thumbnail} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0 bg-muted"
