@@ -244,13 +244,7 @@ app.get('/api/stream/:id', (req, res) => {
 
   // ── FULL STREAM ───────────────────────────────────────────────
   try {
-    res.socket && res.socket.setNoDelay && res.socket.setNoDelay(true);
-    res.writeHead(200, {
-      'Content-Type': 'audio/webm; codecs=opus',
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=3600',
-    });
-    res.flushHeaders();
+    let headersSent = false;
 
     const yt = spawn('yt-dlp', [
       ...YTDLP_ARGS,
@@ -260,6 +254,15 @@ app.get('/api/stream/:id', (req, res) => {
     ]);
 
     yt.stdout.on('data', (chunk) => {
+      if (!headersSent) {
+        res.socket && res.socket.setNoDelay && res.socket.setNoDelay(true);
+        res.writeHead(200, {
+          'Content-Type': 'audio/webm; codecs=opus',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        headersSent = true;
+      }
       if (!res.writableEnded) res.write(chunk);
     });
 

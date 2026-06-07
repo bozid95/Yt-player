@@ -275,11 +275,15 @@ export default function App() {
     }
     const onMeta = () => setDuration(audio.duration)
     const onEnd = () => nextTrack()
-    const onErr = () => setError('Gagal memuat audio')
-    const onPlay = () => { setPlaying(true); setStreamLoading(false) }
+    const onErr = (e: Event) => {
+      const audioEl = e.target as HTMLAudioElement
+      const code = audioEl.error?.code || 0
+      setError(`Gagal memuat audio (${code})`)
+    }
+    const onPlay = () => { setPlaying(true); setStreamLoading(false); setError('') }
     const onPause = () => setPlaying(false)
     const onWait = () => setStreamLoading(true)
-    const onCanPlay = () => setStreamLoading(false)
+    const onCanPlay = () => { setStreamLoading(false); setError('') }
 
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onMeta)
