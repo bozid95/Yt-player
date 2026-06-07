@@ -195,12 +195,11 @@ app.get('/api/stream/:id', async (req, res) => {
   const url = `https://youtube.com/watch?v=${id}`;
   const range = req.headers.range;
 
-  try {
-    const meta = await getFormatMeta(id);
-    const fileSize = meta.fileSize;
-
-    if (range) {
-      // Range request → proxy via direct URL (support seek)
+  if (range) {
+    // Range request → perlu format metadata + proxy (support seek)
+    try {
+      const meta = await getFormatMeta(id);
+      const fileSize = meta.fileSize;
       const directUrl = await new Promise((resolve, reject) => {
         exec(
           `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' -g -f '${meta.formatId}' '${url}' 2>/dev/null`,
@@ -238,43 +237,48 @@ app.get('/api/stream/:id', async (req, res) => {
       proxyReq.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Proxy failed' }); });
       req.on('close', () => proxyReq.destroy());
       proxyReq.end();
-    } else {
-      // Full stream → pipe yt-dlp langsung (cepat)
-      let headersSent = false;
-      const yt = spawn('yt-dlp', [
-        '--cookies', COOKIE_PATH,
-        '--no-warnings',
-        '--js-runtimes', 'deno',
-        '--remote-components', 'ejs:github',
-        '-f', 'bestaudio[acodec=opus]/bestaudio',
-        '-o', '-',
-        url,
-      ]);
-
-      yt.stdout.on('data', (chunk) => {
-        if (!headersSent) {
-          res.writeHead(200, {
-            'Content-Type': 'audio/webm; codecs=opus',
-            'Content-Length': fileSize,
-            'Accept-Ranges': 'bytes',
-            'Cache-Control': 'public, max-age=3600',
-          });
-          headersSent = true;
-        }
-        if (!res.writableEnded) res.write(chunk);
-      });
-
-      yt.stderr.on('data', () => {});
-
-      yt.on('close', (code) => {
-        if (!headersSent) res.status(500).json({ error: 'Stream gagal' });
-        else if (!res.writableEnded) res.end();
-      });
-
-      yt.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Stream error' }); });
-
-      req.on('close', () => { yt.kill(); });
+    } catch (e) {
+      console.error('Range error:', e.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Range gagal' });
     }
+    return;
+  }
+
+  // Full stream → pipe yt-dlp LANGSUNG, tanpa nunggu metadata (cepat mulai)
+  try {
+    let headersSent = false;
+    const yt = spawn('yt-dlp', [
+      '--cookies', COOKIE_PATH,
+      '--no-warnings',
+      '--js-runtimes', 'deno',
+      '--remote-components', 'ejs:github',
+      '-f', 'bestaudio[acodec=opus]/bestaudio',
+      '-o', '-',
+      url,
+    ]);
+
+    yt.stdout.on('data', (chunk) => {
+      if (!headersSent) {
+        res.writeHead(200, {
+          'Content-Type': 'audio/webm; codecs=opus',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        headersSent = true;
+      }
+      if (!res.writableEnded) res.write(chunk);
+    });
+
+    yt.stderr.on('data', () => {});
+
+    yt.on('close', (code) => {
+      if (!headersSent) res.status(500).json({ error: 'Stream gagal' });
+      else if (!res.writableEnded) res.end();
+    });
+
+    yt.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Stream error' }); });
+
+    req.on('close', () => { yt.kill(); });
   } catch (e) {
     console.error('Stream error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: 'Stream gagal' });
