@@ -187,7 +187,7 @@ app.get('/api/stream/:id', (req, res) => {
 
     yt.stdout.on('data', (chunk) => {
       if (!headersSent && !finished) {
-        res.setHeader('Content-Type', format === '18/bestaudio/best' ? 'video/mp4' : 'audio/webm');
+        res.setHeader('Content-Type', 'audio/webm; codecs=opus');
         res.setHeader('Cache-Control', 'public, max-age=3600');
         res.setHeader('Accept-Ranges', 'none');
         headersSent = true;
@@ -199,8 +199,8 @@ app.get('/api/stream/:id', (req, res) => {
 
     yt.on('close', (code) => {
       if (!headersSent && !finished) {
-        if (format === '18/bestaudio/best') {
-          spawnStream('best');
+        if (format === 'bestaudio') {
+          spawnStream('bestaudio[acodec=opus]/bestaudio');
         } else {
           sendJson(500, { error: 'Stream failed' });
         }
@@ -215,7 +215,7 @@ app.get('/api/stream/:id', (req, res) => {
     req.setTimeout(180000, () => { yt.kill(); cleanup(); });
   };
 
-  spawnStream('18/bestaudio/best');
+  spawnStream('bestaudio');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
