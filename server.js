@@ -1,7 +1,6 @@
 const express = require('express');
 const { exec, spawn } = require('child_process');
 const fs = require('fs');
-const https = require('https');
 const path = require('path');
 
 const app = express();
@@ -161,90 +160,14 @@ app.get('/api/related/:id', (req, res) => {
   });
 });
 
-// ─── Stream audio via yt-dlp pipe (support Range/seek) ──────────
-const formatMetaCache = new Map();
-
-function getFormatMeta(id) {
-  return new Promise((resolve, reject) => {
-    const hit = formatMetaCache.get(id);
-    if (hit && Date.now() - hit.time < 10 * 60 * 1000) return resolve(hit);
-
-    exec(
-      `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' --print '"%(format_id)s,%(filesize)s,%(filesize_approx)s"' -f 'bestaudio[acodec=opus]/bestaudio' 'https://youtube.com/watch?v=${id}' 2>/dev/null`,
-      { timeout: 15000, maxBuffer: 1024 * 1024 },
-      (err, stdout) => {
-        if (err || !stdout.trim()) return reject(err || new Error('No format'));
-        const lines = stdout.trim().split('\n').filter(Boolean);
-        const lastLine = lines[lines.length - 1].replace(/"/g, '');
-        const parts = lastLine.split(',');
-        const meta = {
-          formatId: parts[0],
-          fileSize: parseInt(parts[1]) || parseInt(parts[2]) || 0,
-        };
-        formatMetaCache.set(id, { ...meta, time: Date.now() });
-        resolve(meta);
-      }
-    );
-  });
-}
-
-app.get('/api/stream/:id', async (req, res) => {
+// ─── Stream audio via yt-dlp pipe ────────────────────────────────
+app.get('/api/stream/:id', (req, res) => {
   const id = req.params.id;
   if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
 
   const url = `https://youtube.com/watch?v=${id}`;
-  const range = req.headers.range;
 
-  if (range) {
-    // Range request → perlu format metadata + proxy (support seek)
-    try {
-      const meta = await getFormatMeta(id);
-      const fileSize = meta.fileSize;
-      const directUrl = await new Promise((resolve, reject) => {
-        exec(
-          `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' -g -f '${meta.formatId}' '${url}' 2>/dev/null`,
-          { timeout: 15000, maxBuffer: 1024 * 1024 },
-          (err, stdout) => {
-            if (err || !stdout.trim()) return reject(err);
-            resolve(stdout.trim().split('\n')[0]);
-          }
-        );
-      });
-
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunkSize = end - start + 1;
-
-      const urlObj = new URL(directUrl);
-      const opts = {
-        hostname: urlObj.hostname,
-        path: urlObj.pathname + urlObj.search,
-        method: 'GET',
-        headers: { Range: `bytes=${start}-${end}` },
-      };
-
-      const proxyReq = https.request(opts, (proxyRes) => {
-        res.writeHead(206, {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunkSize,
-          'Content-Type': 'audio/webm; codecs=opus',
-          'Cache-Control': 'public, max-age=3600',
-        });
-        proxyRes.pipe(res);
-      });
-      proxyReq.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Proxy failed' }); });
-      req.on('close', () => proxyReq.destroy());
-      proxyReq.end();
-    } catch (e) {
-      console.error('Range error:', e.message);
-      if (!res.headersSent) res.status(500).json({ error: 'Range gagal' });
-    }
-    return;
-  }
-
-  // Full stream → pipe yt-dlp LANGSUNG, tanpa nunggu metadata (cepat mulai)
+  // Pipe yt-dlp langsung — cepat, gak nunggu metadata
   try {
     let headersSent = false;
     const yt = spawn('yt-dlp', [
@@ -261,7 +184,6 @@ app.get('/api/stream/:id', async (req, res) => {
       if (!headersSent) {
         res.writeHead(200, {
           'Content-Type': 'audio/webm; codecs=opus',
-          'Accept-Ranges': 'bytes',
           'Cache-Control': 'public, max-age=3600',
         });
         headersSent = true;
@@ -280,7 +202,6 @@ app.get('/api/stream/:id', async (req, res) => {
 
     req.on('close', () => { yt.kill(); });
   } catch (e) {
-    console.error('Stream error:', e.message);
     if (!res.headersSent) res.status(500).json({ error: 'Stream gagal' });
   }
 });
