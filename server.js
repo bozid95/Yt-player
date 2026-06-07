@@ -183,76 +183,64 @@ const YTDLP_ARGS = [
 // Format audio: M4A/AAC (140) — kompatibilitas lebih luas dari WebM/Opus
 const AUDIO_FMT = '140';
 
+// ─── File cache buat seek (stream + simpan simultan) ────────────
+const CACHE_DIR = '/tmp/yt-cache';
+if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+// Bersihin file > 10 menit
+setInterval(() => {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(CACHE_DIR)) {
+      const p = path.join(CACHE_DIR, f);
+      const st = fs.statSync(p);
+      if (now - st.mtimeMs > 10 * 60 * 1000) fs.unlinkSync(p);
+    }
+  } catch {}
+}, 5 * 60 * 1000);
+
 app.get('/api/stream/:id', (req, res) => {
   const id = req.params.id;
   if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
   const url = `https://youtube.com/watch?v=${id}`;
+  const filePath = path.join(CACHE_DIR, `${id}.m4a`);
   const range = req.headers.range;
 
-  // ── RANGE (seek) ──────────────────────────────────────────────
-  if (range) {
-    (async () => {
-      try {
-        const meta = await getFormatMeta(id);
-        if (!meta.fileSize || !meta.duration) throw new Error('No metadata');
-        const bytesPerSec = meta.fileSize / meta.duration;
+  // ── FILE SUDAH ADA → serve dengan Range support ──────────────
+  if (fs.existsSync(filePath)) {
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
 
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : meta.fileSize - 1;
-        const chunkSize = end - start + 1;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
 
-        const startTime = secsToTime(start / bytesPerSec);
-        const endTime = secsToTime(end / bytesPerSec);
-        const section = `*${startTime}` + (end < meta.fileSize - 1 ? `-${endTime}` : '');
-
-        let headersSent = false;
-        const yt = spawn('yt-dlp', [
-          ...YTDLP_ARGS,
-          '-f', meta.formatId,
-          '-o', '-',
-          '--download-sections', section,
-          url,
-        ]);
-
-        yt.stdout.on('data', (chunk) => {
-          if (!headersSent) {
-            res.writeHead(206, {
-              'Content-Range': `bytes ${start}-${end}/${meta.fileSize}`,
-              'Accept-Ranges': 'bytes',
-              'Content-Type': 'audio/mp4',
-              'Cache-Control': 'public, max-age=3600',
-            });
-            headersSent = true;
-          }
-          if (!res.writableEnded) res.write(chunk);
-        });
-
-        yt.stderr.on('data', () => {});
-
-        yt.on('close', () => {
-          if (!headersSent) { try { res.status(500).json({ error: 'Range gagal' }); } catch {} }
-          else if (!res.writableEnded) res.end();
-        });
-
-        yt.on('error', () => { yt.kill(); if (!res.writableEnded) res.end(); });
-        req.on('close', () => yt.kill());
-
-      } catch (e) {
-        if (!res.headersSent) res.status(500).json({ error: 'Range error' });
-      }
-    })();
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'audio/mp4',
+        'Content-Length': chunkSize,
+        'Cache-Control': 'public, max-age=3600',
+      });
+      fs.createReadStream(filePath, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Type': 'audio/mp4',
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=3600',
+      });
+      fs.createReadStream(filePath).pipe(res);
+    }
     return;
   }
 
-  // ── FULL STREAM ───────────────────────────────────────────────
+  // ── PERTAMA KALI → stream + simpan simultan ──────────────────
   try {
-    // KIRIM HEADERS LANGSUNG — jangan nunggu yt-dlp
-    // Biar browser tau format audionya valid, meski data belum datang
-    res.writeHead(200, {
-      'Content-Type': 'audio/mp4',
-      'Cache-Control': 'public, max-age=3600',
-    });
+    // Pastikan cache dir ada
+    try { if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
 
     const yt = spawn('yt-dlp', [
       ...YTDLP_ARGS,
@@ -261,19 +249,41 @@ app.get('/api/stream/:id', (req, res) => {
       url,
     ]);
 
+    const writeStream = fs.createWriteStream(filePath);
+    let headersSent = false;
+    let pipeDone = false;
+
     yt.stdout.on('data', (chunk) => {
+      pipeDone = true;
+      // Kirim header PERTAMA KALI ada data, bukan sebelumnya
+      if (!headersSent) {
+        headersSent = true;
+        res.writeHead(200, {
+          'Content-Type': 'audio/mp4',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+      }
       if (!res.writableEnded) res.write(chunk);
+      writeStream.write(chunk);
     });
 
     yt.stderr.on('data', () => {});
 
-    yt.on('close', () => { if (!res.writableEnded) res.end(); });
-    yt.on('error', () => { yt.kill(); if (!res.writableEnded) res.end(); });
-    yt.stdout.on('error', () => { if (!res.writableEnded) res.end(); });
+    yt.on('close', () => {
+      writeStream.end();
+      if (!headersSent) {
+        // yt-dlp gagal — hapus cache
+        try { fs.unlinkSync(filePath); } catch {}
+        try { if (!res.headersSent) res.status(504).json({ error: 'Stream timeout' }); } catch {}
+      } else if (!res.writableEnded) res.end();
+    });
+    yt.on('error', () => { yt.kill(); writeStream.end(); if (!res.writableEnded && headersSent) res.end(); });
+    yt.stdout.on('error', () => { writeStream.end(); if (!res.writableEnded && headersSent) res.end(); });
 
-    req.on('close', () => { yt.kill(); });
+    req.on('close', () => { setTimeout(() => yt.kill(), 200); });
 
-    // Pre-cache metadata buat seek berikutnya (background)
+    // Pre-cache metadata buat related tracks (background)
     getFormatMeta(id).catch(() => {});
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ error: 'Stream gagal' });
