@@ -205,11 +205,12 @@ export default function App() {
     if (queue.length === 0) return
     const audio = audioRef.current
     if (repeatMode === 'one') { playTrack(currentIdxRef.current); return }
+    // 'none' = stop di lagu ini, jangan lanjut ke queue next
+    if (repeatMode === 'none') { setPlaying(false); setProgress(0); return }
     const next = currentIdxRef.current + 1
     if (next < queue.length) { playTrack(next); return }
-    // 'none' = stop pas queue habis, jangan lanjut related
-    if (repeatMode === 'none') { setPlaying(false); setProgress(0); return }
-    if (repeatMode === 'all' && related.length === 0) { playTrack(0); return }
+    // Queue habis & bukan 'none' → coba related
+    if (related.length === 0) { setPlaying(false); setProgress(0); return }
     if (related.length > 0) {
       // Ambil fresh dari related (skip duplikat & yg udah ada di queue)
       const fresh = related.filter(t => !queue.find(x => x.id === t.id))
