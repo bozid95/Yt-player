@@ -94,26 +94,29 @@ export default function App() {
     fetch(`/api/related/${queue[i].id}`).then(r => r.ok && r.json()).then(d => {
       if (Array.isArray(d)) setRelated(d)
     }).catch(() => {})
-    // Tunggu audio siap, baru play
-    const onReady = () => {
-      audio.removeEventListener('canplay', onReady)
-      if (currentIdxRef.current === i) {
-        audio.play().catch(e => {
-          // Abaikan error "interrupted" — berarti lagu baru sedang dimuat
-          if (e.message.includes('interrupted')) return
-          setError('Gagal play: ' + e.message)
-        })
-      }
-      loadingRef.current = false
-    }
-    audio.addEventListener('canplay', onReady)
-    // Fallback: coba play langsung (sebagian browser langsung siap)
-    setTimeout(() => {
-      if (loadingRef.current && currentIdxRef.current === i) {
-        audio.play().catch(() => {})
+
+    // Coba play LANGSUNG — works dari user gesture (next/prev button click)
+    audio.play().catch(() => {
+      // Gagal (misal dari ended event) → fallback ke canplay
+      const onReady = () => {
+        audio.removeEventListener('canplay', onReady)
+        if (currentIdxRef.current === i) {
+          audio.play().catch(e => {
+            if (e.message.includes('interrupted')) return
+            setError('Gagal play: ' + e.message)
+          })
+        }
         loadingRef.current = false
       }
-    }, 500)
+      audio.addEventListener('canplay', onReady)
+      // Fallback: coba lagi 500ms
+      setTimeout(() => {
+        if (loadingRef.current && currentIdxRef.current === i) {
+          audio.play().catch(() => {})
+          loadingRef.current = false
+        }
+      }, 500)
+    })
   }, [queue])
 
   const togglePlay = useCallback(() => {
@@ -150,6 +153,7 @@ export default function App() {
         if (audio) {
           audio.src = `/api/stream/${newQueue[playIdx].id}`
           audio.load()
+          audio.play().catch(() => {})
         }
         saveToHistory(newQueue[playIdx])
         return
@@ -612,6 +616,7 @@ export default function App() {
                             if (audio) {
                               audio.src = `/api/stream/${newQueue[newQueue.length - 1].id}`
                               audio.load()
+                              audio.play().catch(() => {})
                             }
                             saveToHistory(t)
                           }, 0)
