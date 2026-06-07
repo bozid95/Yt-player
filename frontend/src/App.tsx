@@ -4,6 +4,14 @@ import { cn } from '@/lib/utils'
 
 type Track = { id: string; title: string; channel: string; thumbnail: string; duration: number }
 type RepeatMode = 'none' | 'all' | 'one'
+type PlayerState = { queue: Track[]; idx: number; currentTime: number; showPlayer: boolean }
+const STATE_KEY = 'yt-player-state'
+function saveState(s: PlayerState) {
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(s)) } catch {}
+}
+function loadState(): PlayerState | null {
+  try { const r = localStorage.getItem(STATE_KEY); return r ? JSON.parse(r) : null } catch { return null }
+}
 
 export default function App() {
   const [query, setQuery] = useState('')
@@ -57,8 +65,10 @@ export default function App() {
   }
 
   // ─── Player State ─────────────────────────────────────────────────
-  const [queue, setQueue] = useState<Track[]>([])
-  const [idx, setIdx] = useState(-1)
+  const savedState = loadState()
+  const [queue, setQueue] = useState<Track[]>(savedState?.queue || [])
+  const [idx, setIdx] = useState(savedState?.idx ?? -1)
+  const restoreTimeRef = useRef(savedState?.currentTime || 0)
   const [playing, setPlaying] = useState(false)
   const [volume, setVolume] = useState(80)
   const [progress, setProgress] = useState(0)
@@ -454,7 +464,89 @@ export default function App() {
   const dur = (s: number) => s && !isNaN(s) ? fmt(s) : '?'
 
   const current = idx >= 0 ? queue[idx] : null
-  const [showPlayer, setShowPlayer] = useState(false)
+  const [showPlayer, setShowPlayer] = useState(() => { const s = loadState(); return s?.showPlayer ?? false })
+  const restoredRef = useRef(false)
+
+  // ─── Session persist: save state on change ──────────────────
+  useEffect(() => {
+    if (idx >= 0 && queue.length > 0) {
+      const audio = audioRef.current
+      saveState({ queue, idx, currentTime: audio?.currentTime || 0, showPlayer })
+    } else {
+      try { localStorage.removeItem(STATE_KEY) } catch {}
+    }
+  }, [queue, idx, showPlayer])
+
+  // ─── Save currentTime tiap 3 detik pas lagi play ────────────
+  useEffect(() => {
+    if (idx < 0) return
+    const id = setInterval(() => {
+      const audio = audioRef.current
+      if (audio && !audio.paused && audio.currentTime > 0) {
+        saveState({ queue, idx, currentTime: audio.currentTime, showPlayer })
+      }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [idx, queue, showPlayer])
+
+  // ─── Save pas page ditutup ─────────────────────────────────
+  useEffect(() => {
+    const onUnload = () => {
+      if (idx >= 0 && queue.length > 0) {
+        const audio = audioRef.current
+        const ct = audio?.currentTime || 0
+        // Jangan timpa posisi 0 (misal auto-reload sebelum audio mulai)
+        if (ct > 0) {
+          saveState({ queue, idx, currentTime: ct, showPlayer })
+        }
+      }
+    }
+    window.addEventListener('beforeunload', onUnload)
+    return () => window.removeEventListener('beforeunload', onUnload)
+  }, [queue, idx, showPlayer])
+
+  // ─── Restore audio session pas mount ───────────────────────
+  useEffect(() => {
+    if (restoredRef.current) return
+    if (idx < 0 || queue.length === 0) return
+    const audio = audioRef.current
+    if (!audio) return
+    restoredRef.current = true
+
+    const track = queue[idx]
+    setPlaying(true)
+    setStreamLoading(true)
+    setDuration(track.duration || 0)
+    setShowPlayer(true)
+
+    // Fetch related
+    fetch(`/api/related/${track.id}`).then(r => r.ok && r.json()).then(d => {
+      if (Array.isArray(d)) setRelated(d)
+    }).catch(() => {})
+
+    saveToHistory(track)
+
+    const seekTime = restoreTimeRef.current
+    const onMeta = () => {
+      setDuration(audio.duration)
+      if (seekTime > 0) audio.currentTime = Math.min(seekTime, audio.duration || seekTime)
+    }
+    audio.addEventListener('loadedmetadata', onMeta, { once: true })
+    audio.src = `/api/stream/${track.id}`
+    audio.load()
+
+    audio.play().catch(() => {
+      const onReady = () => {
+        audio.removeEventListener('canplay', onReady)
+        audio.play().catch(e => {
+          if (e.message.includes('interrupted')) return
+          setError('Gagal play: ' + e.message)
+        })
+      }
+      audio.addEventListener('canplay', onReady)
+      setTimeout(() => { audio.play().catch(() => {}) }, 500)
+    })
+  }, [queue, idx, saveToHistory])
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-0">
