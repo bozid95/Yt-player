@@ -167,9 +167,14 @@ app.get('/api/stream/:id', (req, res) => {
 
   const url = `https://youtube.com/watch?v=${id}`;
 
-  // Pipe yt-dlp langsung — cepat, gak nunggu metadata
+  // Pipe yt-dlp langsung — kirim header dulu biar browser mulai loading
   try {
-    let headersSent = false;
+    res.socket && res.socket.setNoDelay && res.socket.setNoDelay(true);
+    res.writeHead(200, {
+      'Content-Type': 'audio/webm; codecs=opus',
+      'Cache-Control': 'public, max-age=3600',
+    });
+    
     const yt = spawn('yt-dlp', [
       '--cookies', COOKIE_PATH,
       '--no-warnings',
@@ -181,24 +186,16 @@ app.get('/api/stream/:id', (req, res) => {
     ]);
 
     yt.stdout.on('data', (chunk) => {
-      if (!headersSent) {
-        res.writeHead(200, {
-          'Content-Type': 'audio/webm; codecs=opus',
-          'Cache-Control': 'public, max-age=3600',
-        });
-        headersSent = true;
-      }
       if (!res.writableEnded) res.write(chunk);
     });
 
     yt.stderr.on('data', () => {});
 
     yt.on('close', (code) => {
-      if (!headersSent) res.status(500).json({ error: 'Stream gagal' });
-      else if (!res.writableEnded) res.end();
+      if (!res.writableEnded) res.end();
     });
 
-    yt.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Stream error' }); });
+    yt.on('error', () => { yt.kill(); if (!res.writableEnded) res.end(); });
 
     req.on('close', () => { yt.kill(); });
   } catch (e) {
