@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Search, Play, Pause, SkipBack, SkipForward, Volume2, Download, Music2, Repeat, Repeat1, ChevronDown, ChevronUp, Shuffle, Heart, ListMusic } from 'lucide-react'
+import { Search, Play, Pause, SkipBack, SkipForward, Volume2, Download, Music2, Repeat, Repeat1, ChevronDown, ChevronUp, Shuffle, Heart } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Track = { id: string; title: string; channel: string; thumbnail: string; duration: number }
@@ -74,6 +74,10 @@ export default function App() {
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [related, setRelated] = useState<Track[]>([])
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    const saved = localStorage.getItem('yt-speed')
+    return saved ? parseFloat(saved) : 1
+  })
   const searchRef = useRef<HTMLDivElement>(null)
 
   // ─── Local history ──────────────────────────────────────────────────
@@ -139,6 +143,9 @@ export default function App() {
     setShowPlayer(true) // otomatis buka player view
     const audio = audioRef.current
     if (!audio) return
+    // Pastikan listener metadata terpasang SEBELUM src di-set
+    const onMeta = () => setDuration(audio.duration)
+    audio.addEventListener('loadedmetadata', onMeta, { once: true })
     audio.src = `/api/stream/${queue[i].id}`
     audio.load()
     saveToHistory(queue[i])
@@ -204,6 +211,8 @@ export default function App() {
         setError('')
         setStreamLoading(true)
         if (audio) {
+          const m = () => setDuration(audio.duration)
+          audio.addEventListener('loadedmetadata', m, { once: true })
           audio.src = `/api/stream/${newQueue[playIdx].id}`
           audio.load()
           audio.play().catch(() => {})
@@ -270,6 +279,10 @@ export default function App() {
     if (!audio) return
 
     const onTime = () => {
+      // Duration kadang NaN pas loadedmetadata — ambil pas udah valid
+      if (audio.duration && isFinite(audio.duration) && audio.duration !== duration) {
+        setDuration(audio.duration)
+      }
       setCurrentTime(audio.currentTime)
       setProgress(duration ? (audio.currentTime / duration) * 100 : 0)
     }
@@ -306,6 +319,12 @@ export default function App() {
       audio.removeEventListener('canplay', onCanPlay)
     }
   }, [nextTrack, duration, volume]) // ← hapus 'playing' dari deps
+
+  // ─── Playback speed — apply ke audio ─────────────────────────
+  useEffect(() => {
+    const audio = audioRef.current
+    if (audio) audio.playbackRate = playbackSpeed
+  }, [playbackSpeed])
 
   // ─── Media Session API (lock screen) ─────────────────────────────
   useEffect(() => {
@@ -567,6 +586,8 @@ export default function App() {
                       setShowPlayer(true)
                       const audio = audioRef.current
                       if (audio) {
+                        const m = () => setDuration(audio.duration)
+                        audio.addEventListener('loadedmetadata', m, { once: true })
                         audio.src = `/api/stream/${t.id}`
                         audio.load()
                       }
@@ -602,6 +623,8 @@ export default function App() {
                       setShowPlayer(true)
                       const audio = audioRef.current
                       if (audio) {
+                        const m = () => setDuration(audio.duration)
+                        audio.addEventListener('loadedmetadata', m, { once: true })
                         audio.src = `/api/stream/${favorites[i].id}`
                         audio.load()
                         audio.play().catch(() => {})
@@ -739,9 +762,19 @@ export default function App() {
 
               {/* Extra actions row */}
               <div className="flex items-center justify-between">
-                <button className="text-muted-foreground hover:text-foreground active:scale-90 transition-all p-1">
-                  <ListMusic className="w-5 h-5" />
-                  <span className="text-[10px] ml-1">{queue.length}</span>
+                <button onClick={() => {
+                  const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2]
+                  const idx2 = speeds.indexOf(playbackSpeed)
+                  const next = speeds[(idx2 + 1) % speeds.length]
+                  setPlaybackSpeed(next)
+                  localStorage.setItem('yt-speed', String(next))
+                }}
+                  className={cn("text-xs font-bold px-3 py-1.5 rounded-full border transition-all active:scale-90",
+                    playbackSpeed !== 1
+                      ? "text-primary border-primary/40 bg-primary/10"
+                      : "text-muted-foreground border-border hover:text-foreground"
+                  )}>
+                  {playbackSpeed}x
                 </button>
 
                 <div className="flex items-center gap-2 text-muted-foreground">
@@ -771,6 +804,8 @@ export default function App() {
                             setStreamLoading(true)
                             setError('')
                             if (audio) {
+                              const m = () => setDuration(audio.duration)
+                              audio.addEventListener('loadedmetadata', m, { once: true })
                               audio.src = `/api/stream/${newQueue[newQueue.length - 1].id}`
                               audio.load()
                               audio.play().catch(() => {})
