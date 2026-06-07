@@ -221,14 +221,15 @@ app.get('/api/stream/:id', (req, res) => {
     if (fileSize > 0) {
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = Math.min(
-          parts[1] ? parseInt(parts[1], 10) : fileSize - 1,
-          fileSize - 1
-        );
+        let start = parseInt(parts[0], 10);
+        let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+        // Clamp ke data yang beneran ada — biar gak serve dari byte 0
+        if (start >= fileSize) start = Math.max(0, fileSize - 65536);
+        end = Math.min(end, fileSize - 1);
         const chunkSize = end - start + 1;
 
-        if (chunkSize > 0 && start < fileSize) {
+        if (chunkSize > 0) {
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
