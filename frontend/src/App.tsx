@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Search, Play, Pause, SkipBack, SkipForward, Volume2, Download, Music2, Repeat, Repeat1, ChevronDown, ChevronUp, Shuffle, ThumbsUp, ThumbsDown, ListMusic } from 'lucide-react'
+import { Search, Play, Pause, SkipBack, SkipForward, Volume2, Download, Music2, Repeat, Repeat1, ChevronDown, ChevronUp, Shuffle, Heart, ListMusic } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Track = { id: string; title: string; channel: string; thumbnail: string; duration: number }
@@ -70,6 +70,34 @@ export default function App() {
       return next
     })
   }, [])
+
+  // ─── Favorites ────────────────────────────────────────────────────
+  const [favorites, setFavorites] = useState<Track[]>(() => {
+    try {
+      const saved = localStorage.getItem('yt-favorites')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+
+  const toggleFavorite = useCallback((track: Track) => {
+    setFavorites(prev => {
+      const exists = prev.find(t => t.id === track.id)
+      let next: Track[]
+      if (exists) {
+        next = prev.filter(t => t.id !== track.id)
+      } else {
+        next = [track, ...prev]
+      }
+      try { localStorage.setItem('yt-favorites', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const isFavorite = useCallback((id: string) => {
+    return favorites.some(t => t.id === id)
+  }, [favorites])
+
+  const [tab, setTab] = useState<'history' | 'fav'>('history')
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const progressRef = useRef<HTMLDivElement>(null)
@@ -400,6 +428,24 @@ export default function App() {
             )}
           </div>
 
+          {/* Tab bar (only when not searching) */}
+          {query.length < 2 && (
+            <div className="flex items-center gap-1 mb-3 bg-muted/50 rounded-lg p-1">
+              <button onClick={() => setTab('history')}
+                className={cn("flex-1 text-xs font-medium py-1.5 px-3 rounded-md transition-all",
+                  tab === 'history' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}>
+                Diputar sebelumnya
+              </button>
+              <button onClick={() => setTab('fav')}
+                className={cn("flex-1 text-xs font-medium py-1.5 px-3 rounded-md transition-all",
+                  tab === 'fav' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}>
+                Favorit {favorites.length > 0 && <span className="ml-1 text-xs text-primary">({favorites.length})</span>}
+              </button>
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="mb-3 px-4 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20 flex items-center gap-2">
@@ -408,7 +454,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Results */}
+          {/* Hasil Pencarian */}
           {loading ? (
             <div className="text-center text-muted-foreground py-16">
               <div className="inline-block w-6 h-6 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin mb-3" />
@@ -438,18 +484,16 @@ export default function App() {
                 </button>
               ))}
             </div>
-          ) : history.length > 0 && query.length < 2 ? (
+          ) : query.length < 2 && tab === 'history' && history.length > 0 ? (
             <div>
               <h2 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-2.5 px-1">Diputar sebelumnya</h2>
               <div className="space-y-1">
                 {history.map((t) => (
                   <button key={t.id} onClick={() => {
-                    // Tambah ke queue & play
                     setQueue(prev => {
                       const filtered = prev.filter(x => x.id !== t.id)
                       return [t, ...filtered]
                     })
-                    // play di index 0 setelah queue update
                     setTimeout(() => {
                       setIdx(0)
                       currentIdxRef.current = 0
@@ -476,10 +520,45 @@ export default function App() {
                 ))}
               </div>
             </div>
+          ) : query.length < 2 && tab === 'fav' && favorites.length > 0 ? (
+            <div>
+              <h2 className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-2.5 px-1">Favorit</h2>
+              <div className="space-y-1">
+                {favorites.map((t, i) => (
+                  <button key={t.id} onClick={() => {
+                    // Queue = semua favorit, play dari index ini
+                    setQueue(favorites)
+                    setTimeout(() => {
+                      setIdx(i)
+                      currentIdxRef.current = i
+                      setPlaying(true)
+                      setShowPlayer(true)
+                      const audio = audioRef.current
+                      if (audio) {
+                        audio.src = `/api/stream/${favorites[i].id}`
+                        audio.load()
+                        audio.play().catch(() => {})
+                      }
+                    }, 0)
+                  }}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all min-h-[64px] hover:bg-accent border border-transparent">
+                    <img src={t.thumbnail} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0 bg-muted shadow-sm"
+                      onError={e => (e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect fill="%23e0e0e0" width="48" height="48"/></svg>')} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium leading-snug line-clamp-2">{t.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{t.channel} · {dur(t.duration)}</div>
+                    </div>
+                    <div className="w-9 h-9 min-w-[36px] rounded-full flex items-center justify-center flex-shrink-0 bg-primary/10 text-primary">
+                      <Play className="w-4 h-4 ml-0.5" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : query.length < 2 ? (
             <div className="text-center text-muted-foreground py-16">
               <Music2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="text-sm">Cari lagu favorit Anda</p>
+              <p className="text-sm">{tab === 'fav' ? 'Belum ada lagu favorit' : 'Cari lagu favorit Anda'}</p>
             </div>
           ) : query.length >= 2 && tracks.length === 0 && !loading ? (
             <div className="text-center text-muted-foreground py-16">
@@ -521,14 +600,18 @@ export default function App() {
                 <p className="text-sm text-muted-foreground mt-0.5">{current.channel}</p>
               </div>
 
-              {/* Like / Dislike */}
+              {/* Like / Favorit */}
               <div className="w-full flex items-center gap-4 mb-4">
-                <button className="text-muted-foreground hover:text-foreground active:scale-90 transition-all">
-                  <ThumbsUp className="w-5 h-5" />
+                <button onClick={() => toggleFavorite(current)}
+                  className={cn("active:scale-90 transition-all p-1",
+                    isFavorite(current.id) ? "text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.5)]" : "text-muted-foreground hover:text-red-400"
+                  )}>
+                  <Heart className={cn("w-6 h-6", isFavorite(current.id) && "fill-red-500")} />
                 </button>
-                <button className="text-muted-foreground/60 hover:text-muted-foreground active:scale-90 transition-all">
-                  <ThumbsDown className="w-5 h-5" />
-                </button>
+                <span className="text-xs text-muted-foreground">{favorites.length} favorit</span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  Queue: {queue.length} lagu
+                </span>
               </div>
 
               {/* Progress */}
