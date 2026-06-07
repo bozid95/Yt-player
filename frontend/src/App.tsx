@@ -207,6 +207,8 @@ export default function App() {
     if (repeatMode === 'one') { playTrack(currentIdxRef.current); return }
     const next = currentIdxRef.current + 1
     if (next < queue.length) { playTrack(next); return }
+    // 'none' = stop pas queue habis, jangan lanjut related
+    if (repeatMode === 'none') { setPlaying(false); setProgress(0); return }
     if (repeatMode === 'all' && related.length === 0) { playTrack(0); return }
     if (related.length > 0) {
       // Ambil fresh dari related (skip duplikat & yg udah ada di queue)
