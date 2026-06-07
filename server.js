@@ -174,6 +174,7 @@ app.get('/api/stream/:id', (req, res) => {
       'Content-Type': 'audio/webm; codecs=opus',
       'Cache-Control': 'public, max-age=3600',
     });
+    res.flushHeaders();
     
     const yt = spawn('yt-dlp', [
       '--cookies', COOKIE_PATH,
