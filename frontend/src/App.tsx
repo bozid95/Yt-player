@@ -66,6 +66,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streamLoading, setStreamLoading] = useState(false)
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('all')
   const [shuffle, setShuffle] = useState(false)
   const [seeking, setSeeking] = useState(false)
@@ -134,6 +135,7 @@ export default function App() {
     currentIdxRef.current = i
     setPlaying(true)
     setError('')
+    setStreamLoading(true)
     setShowPlayer(true) // otomatis buka player view
     const audio = audioRef.current
     if (!audio) return
@@ -200,6 +202,7 @@ export default function App() {
         setIdx(playIdx)
         setPlaying(true)
         setError('')
+        setStreamLoading(true)
         if (audio) {
           audio.src = `/api/stream/${newQueue[playIdx].id}`
           audio.load()
@@ -273,9 +276,10 @@ export default function App() {
     const onMeta = () => setDuration(audio.duration)
     const onEnd = () => nextTrack()
     const onErr = () => setError('Gagal memuat audio')
-    const onPlay = () => setPlaying(true)
+    const onPlay = () => { setPlaying(true); setStreamLoading(false) }
     const onPause = () => setPlaying(false)
-    const onWait = () => {}
+    const onWait = () => setStreamLoading(true)
+    const onCanPlay = () => setStreamLoading(false)
 
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onMeta)
@@ -284,6 +288,7 @@ export default function App() {
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
     audio.addEventListener('waiting', onWait)
+    audio.addEventListener('canplay', onCanPlay)
     audio.volume = volume / 100
 
     return () => {
@@ -294,6 +299,7 @@ export default function App() {
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('waiting', onWait)
+      audio.removeEventListener('canplay', onCanPlay)
     }
   }, [nextTrack, duration, volume]) // ← hapus 'playing' dari deps
 
@@ -527,6 +533,7 @@ export default function App() {
                       setIdx(0)
                       currentIdxRef.current = 0
                       setPlaying(true)
+                      setStreamLoading(true)
                       setShowPlayer(true)
                       const audio = audioRef.current
                       if (audio) {
@@ -561,6 +568,7 @@ export default function App() {
                       setIdx(i)
                       currentIdxRef.current = i
                       setPlaying(true)
+                      setStreamLoading(true)
                       setShowPlayer(true)
                       const audio = audioRef.current
                       if (audio) {
@@ -677,8 +685,14 @@ export default function App() {
                 </button>
 
                 <button onClick={togglePlay}
-                  className="w-14 h-14 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl active:scale-90 transition-all hover:bg-primary/90">
-                  {playing ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
+                  className="w-14 h-14 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-xl active:scale-90 transition-all hover:bg-primary/90 relative">
+                  {streamLoading ? (
+                    <div className="w-6 h-6 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                  ) : playing ? (
+                    <Pause className="w-6 h-6" />
+                  ) : (
+                    <Play className="w-6 h-6 ml-0.5" />
+                  )}
                 </button>
 
                 <button onClick={nextTrack}
@@ -724,6 +738,7 @@ export default function App() {
                             currentIdxRef.current = newQueue.length - 1
                             setIdx(newQueue.length - 1)
                             setPlaying(true)
+                            setStreamLoading(true)
                             setError('')
                             if (audio) {
                               audio.src = `/api/stream/${newQueue[newQueue.length - 1].id}`
@@ -767,7 +782,13 @@ export default function App() {
           <div className="flex items-center gap-3 flex-shrink-0">
             <button onClick={e => { e.stopPropagation(); togglePlay() }}
               className="w-10 h-10 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-md active:scale-90 transition-all">
-              {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              {streamLoading ? (
+                <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+              ) : playing ? (
+                <Pause className="w-4 h-4" />
+              ) : (
+                <Play className="w-4 h-4 ml-0.5" />
+              )}
             </button>
             <ChevronUp className="w-5 h-5 text-muted-foreground" />
           </div>
