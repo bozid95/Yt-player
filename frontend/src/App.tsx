@@ -335,12 +335,29 @@ export default function App() {
     })
   }, [idx, queue, playing, togglePlay, prevTrack, nextTrack])
 
+  // ─── Lazy load untuk hasil pencarian ─────────────────────────
+  const [displayCount, setDisplayCount] = useState(20)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!sentinelRef.current) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && displayCount < tracks.length) {
+        setDisplayCount(prev => Math.min(prev + 10, tracks.length))
+      }
+    }, { rootMargin: '200px' })
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [displayCount, tracks.length])
+
+  // Reset displayCount pas search baru
   // ─── Search ───────────────────────────────────────────────────────
   const doSearch = useCallback(async (q: string) => {
     if (q.length < 2) return
     setLoading(true)
     setError('')
     setShowSuggestions(false)
+    setDisplayCount(20)
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
       if (!res.ok) throw new Error(res.statusText)
@@ -361,7 +378,10 @@ export default function App() {
 
   // ─── Auto-search debounce: 400ms setelah berhenti ngetik ──────
   useEffect(() => {
-    if (query.length < 2) return
+    if (query.length < 2) {
+      setTracks([]) // bersihin hasil pencarian pas input dikosongin
+      return
+    }
     const timer = setTimeout(() => {
       doSearch(query)
     }, 400)
@@ -501,7 +521,7 @@ export default function App() {
             </div>
           ) : tracks.length > 0 ? (
             <div className="space-y-1">
-              {tracks.map((t, i) => (
+              {tracks.slice(0, displayCount).map((t, i) => (
                 <button key={t.id} onClick={() => { if (idx === i) togglePlay(); else playTrack(i) }}
                   className={cn(
                     "w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all min-h-[64px]",
@@ -522,6 +542,12 @@ export default function App() {
                   </div>
                 </button>
               ))}
+              {displayCount < tracks.length && (
+                <div ref={sentinelRef} className="flex items-center justify-center py-4 text-xs text-muted-foreground">
+                  <div className="inline-block w-4 h-4 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin mr-2" />
+                  Memuat lainnya...
+                </div>
+              )}
             </div>
           ) : query.length < 2 && tab === 'history' && history.length > 0 ? (
             <div>

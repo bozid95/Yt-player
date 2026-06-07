@@ -77,8 +77,13 @@ try { appVersion = fs.readFileSync('/app/version.txt', 'utf-8').trim(); } catch 
 app.get('/api/version', (req, res) => { res.json({ version: appVersion }); });
 
 // ─── Static files ─────────────────────────────────────────────────
+// index.html: no-cache biar selalu dapet build terbaru
+app.use((req, res, next) => {
+  if (req.path === '/') res.set('Cache-Control', 'no-cache, must-revalidate');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'frontend', 'dist'), {
-  maxAge: '1h', etag: true, immutable: true,
+  maxAge: '1h', etag: true,
 }));
 
 // ─── Parse yt-dlp JSON ────────────────────────────────────────────
@@ -123,7 +128,7 @@ app.get('/api/search', (req, res) => {
   const hit = cached(cacheKey);
   if (hit) return res.json(hit);
   const child = exec(
-    `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings 'ytsearch10:${q.replace(/'/g, "'\\''")}' 2>/dev/null`,
+    `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings 'ytsearch30:${q.replace(/'/g, "'\\''")}' 2>/dev/null`,
     { timeout: 15000, maxBuffer: 512 * 1024 },
     (err, stdout) => {
       if (err) {

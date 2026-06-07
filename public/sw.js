@@ -1,31 +1,40 @@
-const CACHE = 'yt-player-v2'
-const AUDIO_CACHE = 'yt-audio-v1'
+const CACHE = 'yt-player-v3'
 
 self.addEventListener('install', () => self.skipWaiting())
+
 self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim())
+  // Hapus cache lama biar gak numpuk
+  e.waitUntil(
+    caches.keys().then(keys => Promise.all(
+      keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+    )).then(() => self.clients.claim())
+  )
 })
 
-// ─── Intercept audio stream ──────────────────────────────────────
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url)
 
-  // Audio streams — biarkan hidup selama mungkin
+  // Audio streams — jangan di-cache, biarkan hidup
   if (url.pathname.startsWith('/api/stream/')) {
     const response = fetch(e.request)
-    // Keep service worker alive selama stream
-    e.waitUntil(
-      response.then(r => {
-        // Clone untuk keepalive
-        const reader = r.clone().body.getReader()
-        return reader.closed
-      })
-    )
+    e.waitUntil(response.then(r => r.clone().body.getReader().closed))
     e.respondWith(response)
     return
   }
 
-  // Cache static assets
+  // Navigation (HTML) — network-first, fallback ke cache
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        const clone = res.clone()
+        caches.open(CACHE).then(cache => cache.put(e.request, clone))
+        return res
+      }).catch(() => caches.match(e.request))
+    )
+    return
+  }
+
+  // Static assets (JS, CSS, gambar) — cache-first
   if (e.request.method === 'GET' && !url.pathname.startsWith('/api/')) {
     e.respondWith(
       caches.open(CACHE).then(cache =>
