@@ -32,7 +32,7 @@ function getFormatMeta(id) {
     if (hit && Date.now() - hit.time < 10 * 60 * 1000) return resolve(hit.data);
 
     exec(
-      `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' --print '%(format_id)s,%(filesize)s,%(duration)s' -f 'bestaudio[acodec=opus]/bestaudio' 'https://youtube.com/watch?v=${id}' 2>/dev/null`,
+      `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' --print '%(format_id)s,%(filesize)s,%(duration)s' -f '${AUDIO_FMT}' 'https://youtube.com/watch?v=${id}' 2>/dev/null`,
       { timeout: 15000, maxBuffer: 1024 * 1024 },
       (err, stdout) => {
         if (err || !stdout.trim()) return reject(err || new Error('No format'));
@@ -180,6 +180,9 @@ const YTDLP_ARGS = [
   '--remote-components', 'ejs:github',
 ];
 
+// Format audio: M4A/AAC (140) — kompatibilitas lebih luas dari WebM/Opus
+const AUDIO_FMT = '140';
+
 app.get('/api/stream/:id', (req, res) => {
   const id = req.params.id;
   if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
@@ -217,7 +220,7 @@ app.get('/api/stream/:id', (req, res) => {
             res.writeHead(206, {
               'Content-Range': `bytes ${start}-${end}/${meta.fileSize}`,
               'Accept-Ranges': 'bytes',
-              'Content-Type': 'audio/webm; codecs=opus',
+              'Content-Type': 'audio/mp4',
               'Cache-Control': 'public, max-age=3600',
             });
             headersSent = true;
@@ -244,25 +247,21 @@ app.get('/api/stream/:id', (req, res) => {
 
   // ── FULL STREAM ───────────────────────────────────────────────
   try {
-    let headersSent = false;
+    // KIRIM HEADERS LANGSUNG — jangan nunggu yt-dlp
+    // Biar browser tau format audionya valid, meski data belum datang
+    res.writeHead(200, {
+      'Content-Type': 'audio/mp4',
+      'Cache-Control': 'public, max-age=3600',
+    });
 
     const yt = spawn('yt-dlp', [
       ...YTDLP_ARGS,
-      '-f', 'bestaudio[acodec=opus]/bestaudio',
+      '-f', AUDIO_FMT,
       '-o', '-',
       url,
     ]);
 
     yt.stdout.on('data', (chunk) => {
-      if (!headersSent) {
-        res.socket && res.socket.setNoDelay && res.socket.setNoDelay(true);
-        res.writeHead(200, {
-          'Content-Type': 'audio/webm; codecs=opus',
-          'Accept-Ranges': 'bytes',
-          'Cache-Control': 'public, max-age=3600',
-        });
-        headersSent = true;
-      }
       if (!res.writableEnded) res.write(chunk);
     });
 
@@ -270,6 +269,7 @@ app.get('/api/stream/:id', (req, res) => {
 
     yt.on('close', () => { if (!res.writableEnded) res.end(); });
     yt.on('error', () => { yt.kill(); if (!res.writableEnded) res.end(); });
+    yt.stdout.on('error', () => { if (!res.writableEnded) res.end(); });
 
     req.on('close', () => { yt.kill(); });
 
