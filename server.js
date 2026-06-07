@@ -45,6 +45,16 @@ if (fs.existsSync(COOKIE_PATH)) {
   console.warn('[WARN] Tidak ada cookies — streaming mungkin gagal');
 }
 
+// ─── Version endpoint (buat auto-update frontend) ──────────────
+let appVersion = '0';
+try {
+  appVersion = fs.readFileSync('/app/version.txt', 'utf-8').trim();
+} catch {}
+
+app.get('/api/version', (req, res) => {
+  res.json({ version: appVersion });
+});
+
 // ─── Static files with cache ──────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'frontend', 'dist'), {
   maxAge: '1h',

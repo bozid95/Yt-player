@@ -14,6 +14,9 @@ RUN apk add --no-cache python3 py3-pip ffmpeg deno && \
 
 WORKDIR /app
 
+# Save build version
+RUN date +%s > /app/version.txt
+
 # Backend
 COPY package.json ./
 RUN npm install

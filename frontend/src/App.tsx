@@ -24,6 +24,28 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handler)
   }, [])
 
+  // ─── Auto-update: cek versi tiap 30 detik ────────────────────
+  useEffect(() => {
+    let savedVersion = localStorage.getItem('yt-app-version')
+    const check = async () => {
+      try {
+        const res = await fetch('/api/version')
+        if (!res.ok) return
+        const { version } = await res.json()
+        if (!savedVersion) {
+          savedVersion = version
+          localStorage.setItem('yt-app-version', version)
+        } else if (version !== savedVersion) {
+          localStorage.setItem('yt-app-version', version)
+          window.location.reload() // reload tanpa hapus localStorage
+        }
+      } catch {}
+    }
+    check() // cek saat mount
+    const id = setInterval(check, 30000)
+    return () => clearInterval(id)
+  }, [])
+
   const handleInstall = async () => {
     if (installPrompt) {
       (installPrompt as any).prompt()
@@ -327,7 +349,14 @@ export default function App() {
     doSearch(q)
   }, [doSearch])
 
-  // Gak auto-search tiap ngetik — search cuma lewat suggestion tap / Enter
+  // ─── Auto-search debounce: 400ms setelah berhenti ngetik ──────
+  useEffect(() => {
+    if (query.length < 2) return
+    const timer = setTimeout(() => {
+      doSearch(query)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [query, doSearch])
 
   // ─── Keyboard shortcuts ──────────────────────────────────────────
   useEffect(() => {
