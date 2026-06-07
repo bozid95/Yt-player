@@ -151,71 +151,124 @@ app.get('/api/related/:id', (req, res) => {
   });
 });
 
-// ─── Stream audio via yt-dlp pipe ────────────────────────────────
-app.get('/api/stream/:id', (req, res) => {
+// ─── Stream audio via yt-dlp pipe (support Range/seek) ──────────
+const formatMetaCache = new Map();
+
+function getFormatMeta(id) {
+  return new Promise((resolve, reject) => {
+    const hit = formatMetaCache.get(id);
+    if (hit && Date.now() - hit.time < 10 * 60 * 1000) return resolve(hit);
+
+    exec(
+      `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' --print '"%(format_id)s,%(filesize)s,%(filesize_approx)s"' -f 'bestaudio[acodec=opus]/bestaudio' 'https://youtube.com/watch?v=${id}' 2>/dev/null`,
+      { timeout: 15000, maxBuffer: 1024 * 1024 },
+      (err, stdout) => {
+        if (err || !stdout.trim()) return reject(err || new Error('No format'));
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        const lastLine = lines[lines.length - 1].replace(/"/g, '');
+        const parts = lastLine.split(',');
+        const meta = {
+          formatId: parts[0],
+          fileSize: parseInt(parts[1]) || parseInt(parts[2]) || 0,
+        };
+        formatMetaCache.set(id, { ...meta, time: Date.now() });
+        resolve(meta);
+      }
+    );
+  });
+}
+
+app.get('/api/stream/:id', async (req, res) => {
   const id = req.params.id;
   if (!id || id.length !== 11) return res.status(400).json({ error: 'Invalid ID' });
 
   const url = `https://youtube.com/watch?v=${id}`;
-  let headersSent = false;
-  let finished = false;
+  const range = req.headers.range;
 
-  const cleanup = () => {
-    if (!finished) {
-      finished = true;
-      if (!res.writableEnded) { try { res.end(); } catch {} }
-    }
-  };
+  try {
+    const meta = await getFormatMeta(id);
+    const fileSize = meta.fileSize;
 
-  const sendJson = (code, data) => {
-    if (!headersSent && !finished && !res.writableEnded) {
-      finished = true;
-      res.status(code).json(data);
-    }
-  };
+    if (range) {
+      // Range request → proxy via direct URL (support seek)
+      const directUrl = await new Promise((resolve, reject) => {
+        exec(
+          `yt-dlp --cookies '${COOKIE_PATH}' --no-warnings --js-runtimes deno --remote-components 'ejs:github' -g -f '${meta.formatId}' '${url}' 2>/dev/null`,
+          { timeout: 15000, maxBuffer: 1024 * 1024 },
+          (err, stdout) => {
+            if (err || !stdout.trim()) return reject(err);
+            resolve(stdout.trim().split('\n')[0]);
+          }
+        );
+      });
 
-  const spawnStream = (format) => {
-    const yt = spawn('yt-dlp', [
-      '--cookies', COOKIE_PATH,
-      '--no-warnings',
-      '--js-runtimes', 'deno',
-      '--remote-components', 'ejs:github',
-      '-f', format,
-      '-o', '-',
-      url,
-    ]);
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
 
-    yt.stdout.on('data', (chunk) => {
-      if (!headersSent && !finished) {
-        res.setHeader('Content-Type', 'audio/webm; codecs=opus');
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-        res.setHeader('Accept-Ranges', 'none');
-        headersSent = true;
-      }
-      if (!finished) res.write(chunk);
-    });
+      const urlObj = new URL(directUrl);
+      const opts = {
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
+        method: 'GET',
+        headers: { Range: `bytes=${start}-${end}` },
+      };
 
-    yt.stderr.on('data', () => {});
+      const proxyReq = https.request(opts, (proxyRes) => {
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': 'audio/webm; codecs=opus',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        proxyRes.pipe(res);
+      });
+      proxyReq.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Proxy failed' }); });
+      req.on('close', () => proxyReq.destroy());
+      proxyReq.end();
+    } else {
+      // Full stream → pipe yt-dlp langsung (cepat)
+      let headersSent = false;
+      const yt = spawn('yt-dlp', [
+        '--cookies', COOKIE_PATH,
+        '--no-warnings',
+        '--js-runtimes', 'deno',
+        '--remote-components', 'ejs:github',
+        '-f', 'bestaudio[acodec=opus]/bestaudio',
+        '-o', '-',
+        url,
+      ]);
 
-    yt.on('close', (code) => {
-      if (!headersSent && !finished) {
-        if (format === 'bestaudio') {
-          spawnStream('bestaudio[acodec=opus]/bestaudio');
-        } else {
-          sendJson(500, { error: 'Stream failed' });
+      yt.stdout.on('data', (chunk) => {
+        if (!headersSent) {
+          res.writeHead(200, {
+            'Content-Type': 'audio/webm; codecs=opus',
+            'Content-Length': fileSize,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=3600',
+          });
+          headersSent = true;
         }
-      } else {
-        cleanup();
-      }
-    });
+        if (!res.writableEnded) res.write(chunk);
+      });
 
-    yt.on('error', () => cleanup());
+      yt.stderr.on('data', () => {});
 
-    req.on('close', () => { yt.kill(); cleanup(); });
-    req.setTimeout(180000, () => { yt.kill(); cleanup(); });
-  };
+      yt.on('close', (code) => {
+        if (!headersSent) res.status(500).json({ error: 'Stream gagal' });
+        else if (!res.writableEnded) res.end();
+      });
 
-  spawnStream('bestaudio');
+      yt.on('error', () => { if (!res.headersSent) res.status(500).json({ error: 'Stream error' }); });
+
+      req.on('close', () => { yt.kill(); });
+    }
+  } catch (e) {
+    console.error('Stream error:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Stream gagal' });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
