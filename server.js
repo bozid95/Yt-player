@@ -29,15 +29,16 @@ if (process.env.YOUTUBE_COOKIES) {
   try {
     const content = Buffer.from(process.env.YOUTUBE_COOKIES, 'base64').toString('utf-8');
     fs.writeFileSync(COOKIE_PATH, content, 'utf-8');
+    fs.chmodSync(COOKIE_PATH, 0o444); // read-only biar gak di-rewrite yt-dlp
     console.log('[OK] Cookies loaded from YOUTUBE_COOKIES env');
   } catch (e) {
     console.error('[ERR] Gagal decode YOUTUBE_COOKIES:', e.message);
   }
 }
 
-// Cek cookies di background
+// Cek cookies di background (tanpa --cookies biar gak rewrite)
 if (fs.existsSync(COOKIE_PATH)) {
-  exec(`yt-dlp --cookies '${COOKIE_PATH}' --skip-download --print id 'https://music.youtube.com/watch?v=dQw4w9WgXcQ' 2>/dev/null`,
+  exec(`yt-dlp --skip-download --print id 'https://music.youtube.com/watch?v=dQw4w9WgXcQ' 2>/dev/null`,
     (err) => { if (err) console.warn('[WARN] Cookies mungkin expired'); else console.log('[OK] YouTube cookies valid'); }
   );
 } else {
@@ -123,30 +124,30 @@ app.get('/api/related/:id', (req, res) => {
   if (hit) return res.json(hit);
 
   const tryMix = (url, done) => {
-    const child = exec(
-      `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --dump-json --no-warnings '${url}' 2>/dev/null`,
-      { timeout: 10000, maxBuffer: 512 * 1024 },
-      (err, stdout) => {
-        if (err) return done(null);
-        const items = parseYtLines(stdout);
-        if (items.length > 1) {
-          setCache(cacheKey, items.slice(1, 16));
-          return done(items.slice(1, 16));
-        }
-        done(null);
+  const child = exec(
+    `yt-dlp --cookies '${COOKIE_PATH}' --flat-playlist --playlist-end 16 --dump-json --no-warnings '${url}' 2>/dev/null`,
+    { timeout: 15000, maxBuffer: 512 * 1024 },
+    (err, stdout) => {
+      if (err || res.headersSent) return done(null);
+      const items = parseYtLines(stdout);
+      if (items.length > 1) {
+        setCache(cacheKey, items.slice(1, 16));
+        return done(items.slice(1, 16));
       }
-    );
-    // Kill yt-dlp kalo request dibatalin
-    req.on('close', () => { child.kill(); if (!res.headersSent) res.json([]); });
+      done(null);
+    }
+  );
+  req.on('close', () => { child.kill(); });
   };
 
   const musicUrl = `https://music.youtube.com/watch?v=${id}&list=RDAMVM${id}`;
   tryMix(musicUrl, (result) => {
-    if (result) return res.json(result);
-    const fallbackUrl = `https://www.youtube.com/watch?v=${id}&list=RD${id}`;
-    tryMix(fallbackUrl, (fallback) => {
-      res.json(fallback || []);
-    });
+  if (res.headersSent) return;
+  if (result) return res.json(result);
+  const fallbackUrl = `https://www.youtube.com/watch?v=${id}&list=RD${id}`;
+  tryMix(fallbackUrl, (fallback) => {
+    if (!res.headersSent) res.json(fallback || []);
+  });
   });
 });
 
